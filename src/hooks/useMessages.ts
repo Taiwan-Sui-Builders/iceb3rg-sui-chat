@@ -523,6 +523,15 @@ export function useMessages(chatId: string | null) {
                             checkpointKeys: checkpoint ? Object.keys(checkpoint) : []
                         });
 
+                        // Early return if checkpoint has no transactions - avoid unnecessary processing
+                        if (!executedTransactions || executedTransactions.length === 0) {
+                            console.log('[useMessages] Checkpoint has no transactions, skipping:', {
+                                chatId,
+                                checkpointSequence: response.cursor?.toString()
+                            })
+                            return // Skip this checkpoint entirely
+                        }
+
                         // Query events for MessageSent type
                         // ExecutedTransaction objects have transaction digest and events
                         if (executedTransactions.length > 0) {
@@ -673,8 +682,23 @@ export function useMessages(chatId: string | null) {
                                 }
                             }
                         } else {
+                            // Check if checkpoint has any transactions - if not, skip processing
+                            const hasTransactions = executedTransactions && executedTransactions.length > 0
+                            
+                            if (!hasTransactions) {
+                                // Checkpoint has no transactions, skip to avoid unnecessary refetches
+                                console.log('[useMessages] Checkpoint has no transactions, skipping:', {
+                                    chatId,
+                                    checkpointSequence: response.cursor?.toString()
+                                })
+                                return // Skip this checkpoint
+                            }
+                            
                             // Fallback: just trigger a refetch if we can't get transaction digests
-                            console.log('[useMessages] Checkpoint received, triggering refetch:', { chatId });
+                            console.log('[useMessages] Checkpoint received with transactions, triggering refetch:', {
+                                chatId,
+                                transactionCount: executedTransactions.length
+                            });
                             
                             // Invalidate and refetch chat room query to refresh message count
                             invalidateChatObjectQueries()
