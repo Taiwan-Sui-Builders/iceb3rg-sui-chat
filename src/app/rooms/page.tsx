@@ -20,8 +20,9 @@ type FilterOption = 'all' | 'public' | 'private';
 export default function RoomsPage() {
   const router = useRouter();
   const account = useCurrentAccount();
-  const { user, isRegistered } = useUser();
-  const { rooms, isLoading, error, refetch } = useChatRooms();
+  const { profile, isRegistered } = useUser();
+  const chatIndexId = profile?.chatIndexId || null;
+  const { rooms, isLoading, error, refetch } = useChatRooms(chatIndexId);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterOption>('all');
@@ -39,9 +40,9 @@ export default function RoomsPage() {
 
     // Filter by type
     if (filter === 'public') {
-      filtered = filtered.filter((room) => !room.isPrivate);
+      filtered = filtered.filter((room) => !room.isEncrypted);
     } else if (filter === 'private') {
-      filtered = filtered.filter((room) => room.isPrivate);
+      filtered = filtered.filter((room) => room.isEncrypted);
     }
 
     // Filter by search query
@@ -179,17 +180,15 @@ function RoomCard({ room }: { room: ChatRoom }) {
         <h3 className="text-lg font-semibold text-black dark:text-zinc-50 truncate">
           {room.name}
         </h3>
-        {room.isPrivate && (
+        {room.isEncrypted && (
           <span className="ml-2 px-2 py-1 text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded">
-            Private
+            Encrypted
           </span>
         )}
       </div>
       <div className="space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
         <p>Messages: {room.messageCount}</p>
-        {room.memberCount !== undefined && (
-          <p>Members: {room.memberCount}</p>
-        )}
+        <p>Members: {room.members.length}</p>
       </div>
     </Link>
   );

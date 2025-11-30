@@ -1,17 +1,19 @@
 // Hook for messages data and operations
 
-import { useSuiClientQuery } from '@mysten/dapp-kit';
+import { useSuiClient, useSuiClientQuery } from '@mysten/dapp-kit';
 import { useQuery } from '@tanstack/react-query';
 import { parseMessageObject } from '@/lib/sui/message';
-import { PACKAGE_ID, MODULES, MESSAGES_PER_PAGE, MAX_MESSAGES_DISPLAY } from '@/lib/types';
+import { MESSAGES_PER_PAGE, MAX_MESSAGES_DISPLAY } from '@/lib/types';
 import type { Message } from '@/lib/types';
-
-const MESSAGE_TYPE = `${PACKAGE_ID}::${MODULES.MESSAGE}::Message`;
 
 /**
  * Hook to get messages for a chat room
+ * Messages are stored as dynamic fields with sequence numbers (u64) as keys
  */
-export function useMessages(chatId: string | null, isPrivate: boolean = false) {
+export function useMessages(chatId: string | null) {
+    const client = useSuiClient();
+
+    // Get chat room to get message count
     const { data: chatData } = useSuiClientQuery(
         'getObject',
         {
@@ -31,6 +33,7 @@ export function useMessages(chatId: string | null, isPrivate: boolean = false) {
             : 0;
 
     // Fetch messages using dynamic fields
+    // Messages are stored with u64 sequence numbers as keys
     const { data: dynamicFields, isLoading, error, refetch } = useSuiClientQuery(
         'getDynamicFields',
         {
@@ -41,57 +44,115 @@ export function useMessages(chatId: string | null, isPrivate: boolean = false) {
         }
     );
 
-    // Filter for message keys and parse messages
-    const messages: Message[] = [];
+    // Extract message indices from dynamic fields
+    // Dynamic fields with u64 keys are the messages
+    const messageIndices: number[] = [];
     if (dynamicFields?.data) {
-        const messageFields = dynamicFields.data
-            .filter((field: any) => {
-                const name = field.name;
-                return name?.type === `${PACKAGE_ID}::${MODULES.CHAT}::MessageKey`;
-            })
-            .slice(0, MAX_MESSAGES_DISPLAY); // Limit to max display
+        dynamicFields.data.forEach((field: any) => {
+            const name = field.name;
+            // Check if this is a u64 key (message index)
+            // The name can be in different formats depending on SDK version
+            if (name) {
+                let index: number | null = null;
 
-        // Sort by count (descending for newest first)
-        messageFields.sort((a: any, b: any) => {
-            const aCount = a.name?.value?.count || 0;
-            const bCount = b.name?.value?.count || 0;
-            return bCount - aCount;
+                if (typeof name === 'number') {
+                    index = name;
+                } else if (name.type === 'u64' || name.type === '0x1::string::String') {
+                    // Handle different name formats
+                    if (typeof name.value === 'number') {
+                        index = name.value;
+                    } else if (typeof name.value === 'string') {
+                        const parsed = parseInt(name.value, 10);
+                        if (!isNaN(parsed)) {
+                            index = parsed;
+                        }
+                    }
+                } else if (typeof name.value === 'number') {
+                    index = name.value;
+                }
+
+                if (index !== null && index >= 0 && index < messageCount) {
+                    messageIndices.push(index);
+                }
+            }
         });
-
-        // Fetch each message object
-        // Note: In production, you'd batch these queries
-        for (const field of messageFields.slice(0, MESSAGES_PER_PAGE)) {
-            // This is a simplified version - you'd need to fetch the actual message object
-            // For now, we'll need to implement proper message fetching
-        }
     }
+
+    // Sort indices descending (newest first) and limit
+    messageIndices.sort((a, b) => b - a);
+    const indicesToFetch = messageIndices.slice(0, MAX_MESSAGES_DISPLAY);
+
+    // Fetch message objects
+    const {
+        data: messagesData,
+        isLoading: isLoadingMessages,
+        error: messagesError,
+    } = useQuery({
+        queryKey: ['messages', chatId, indicesToFetch],
+        queryFn: async () => {
+            if (indicesToFetch.length === 0) return [];
+
+            // Fetch dynamic field objects
+            // Note: We need to use getDynamicFieldObject for each message
+            const messagePromises = indicesToFetch.map((index: number) =>
+                client.getDynamicFieldObject({
+                    parentId: chatId!,
+                    name: {
+                        type: 'u64',
+                        value: index,
+                    },
+                })
+            );
+
+            const results = await Promise.all(messagePromises);
+            return results
+                .map((result, idx) => {
+                    if (result.data) {
+                        return parseMessageObject(result.data, indicesToFetch[idx]);
+                    }
+                    return null;
+                })
+                .filter(Boolean) as Message[];
+        },
+        enabled: indicesToFetch.length > 0 && !!chatId,
+    });
+
+    const messages: Message[] = messagesData || [];
 
     return {
         messages,
         messageCount,
-        isLoading,
-        error,
+        isLoading: isLoading || isLoadingMessages,
+        error: error || messagesError,
         refetch,
         hasMore: messageCount > messages.length,
     };
 }
 
 /**
- * Hook to get a single message by ID
+ * Hook to get a single message by index
  */
-export function useMessage(messageId: string | null) {
-    return useSuiClientQuery(
-        'getObject',
-        {
-            id: messageId || '',
-            options: {
-                showContent: true,
-                showType: true,
-            },
-        },
-        {
-            enabled: !!messageId,
-        }
-    );
-}
+export function useMessage(chatId: string | null, messageIndex: number | null) {
+    const client = useSuiClient();
 
+    return useQuery({
+        queryKey: ['message', chatId, messageIndex],
+        queryFn: async () => {
+            if (!chatId || messageIndex === null) return null;
+
+            const result = await client.getDynamicFieldObject({
+                parentId: chatId,
+                name: {
+                    type: 'u64',
+                    value: messageIndex,
+                },
+            });
+
+            if (result.data) {
+                return parseMessageObject(result.data, messageIndex);
+            }
+            return null;
+        },
+        enabled: !!chatId && messageIndex !== null,
+    });
+}

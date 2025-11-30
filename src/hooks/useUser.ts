@@ -1,12 +1,12 @@
-// Hook for user data and operations
+// Hook for user profile data and operations
 
 import { useSuiClientQuery, useCurrentAccount } from '@mysten/dapp-kit';
 import { useQuery } from '@tanstack/react-query';
-import { parseUserObject } from '@/lib/sui/user';
+import { parseProfileObject } from '@/lib/sui/profile';
 import { PACKAGE_ID, MODULES } from '@/lib/types';
-import type { User } from '@/lib/types';
+import type { Profile } from '@/lib/types';
 
-const USER_TYPE = `${PACKAGE_ID}::${MODULES.USER}::User`;
+const PROFILE_TYPE = `${PACKAGE_ID}::${MODULES.PROFILE}::Profile`;
 
 /**
  * Hook to get current user's profile
@@ -14,12 +14,12 @@ const USER_TYPE = `${PACKAGE_ID}::${MODULES.USER}::User`;
 export function useUser() {
     const account = useCurrentAccount();
 
-    const { data: userObject, isLoading, error } = useSuiClientQuery(
+    const { data: profileObject, isLoading, error } = useSuiClientQuery(
         'getOwnedObjects',
         {
             owner: account?.address || '',
             filter: {
-                StructType: USER_TYPE,
+                StructType: PROFILE_TYPE,
             },
             options: {
                 showContent: true,
@@ -31,24 +31,20 @@ export function useUser() {
         }
     );
 
-    const user: User | null = userObject?.data?.[0]
-        ? parseUserObject(userObject.data[0])
+    const profile: Profile | null = profileObject?.data?.[0]
+        ? parseProfileObject(profileObject.data[0])
         : null;
 
-    if (user && account?.address) {
-        user.address = account.address;
-    }
-
     return {
-        user,
+        profile,
         isLoading,
         error,
-        isRegistered: !!user,
+        isRegistered: !!profile,
     };
 }
 
 /**
- * Hook to get user by address
+ * Hook to get user profile by address
  */
 export function useUserByAddress(address: string | null) {
     return useSuiClientQuery(
@@ -56,7 +52,7 @@ export function useUserByAddress(address: string | null) {
         {
             owner: address || '',
             filter: {
-                StructType: USER_TYPE,
+                StructType: PROFILE_TYPE,
             },
             options: {
                 showContent: true,
@@ -69,3 +65,21 @@ export function useUserByAddress(address: string | null) {
     );
 }
 
+/**
+ * Hook to get user's UserChatIndex
+ */
+export function useUserChatIndex(chatIndexId: string | null) {
+    return useSuiClientQuery(
+        'getObject',
+        {
+            id: chatIndexId || '',
+            options: {
+                showContent: true,
+                showType: true,
+            },
+        },
+        {
+            enabled: !!chatIndexId,
+        }
+    );
+}

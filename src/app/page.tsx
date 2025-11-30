@@ -10,19 +10,19 @@ import { useUser } from '@/hooks/useUser';
 export default function Home() {
   const router = useRouter();
   const account = useCurrentAccount();
-  const { user, isLoading, isRegistered } = useUser();
+  const { profile, isLoading, isRegistered } = useUser();
 
   useEffect(() => {
     if (!account) return;
 
     if (!isLoading) {
-      if (isRegistered && user) {
+      if (isRegistered && profile) {
         router.push('/rooms');
       } else if (!isRegistered) {
         router.push('/register');
       }
     }
-  }, [account, isLoading, isRegistered, user, router]);
+  }, [account, isLoading, isRegistered, profile, router]);
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-black">

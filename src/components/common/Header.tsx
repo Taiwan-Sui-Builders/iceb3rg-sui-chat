@@ -8,7 +8,7 @@ import { useUser } from '@/hooks/useUser';
 
 export function Header() {
   const account = useCurrentAccount();
-  const { user } = useUser();
+  const { profile } = useUser();
 
   return (
     <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black">
@@ -19,9 +19,9 @@ export function Header() {
               Sui Chat
             </Link>
           </div>
-          
+
           <nav className="flex items-center space-x-4">
-            {account && user && (
+            {account && profile && (
               <>
                 <Link
                   href="/rooms"
@@ -36,7 +36,7 @@ export function Header() {
                   Users
                 </Link>
                 <div className="text-sm text-zinc-600 dark:text-zinc-400">
-                  {user.name}
+                  {profile.displayName}
                 </div>
               </>
             )}

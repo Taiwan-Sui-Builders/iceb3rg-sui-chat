@@ -1,80 +1,63 @@
 // Core types for Sui Chat application
 
-export interface User {
+export interface Profile {
     id: string; // Object ID
-    name: string;
-    portraitUrl: string;
-    encryptionPublicKey: string;
-    treasury: string; // Address
-    address: string; // Wallet address
+    owner: string; // Wallet address
+    customId: string; // Unique custom ID
+    displayName: string;
+    avatarBlobId: string; // Walrus blob ID
+    publicKey: Uint8Array | string; // Public key for encryption
+    chatIndexId: string; // UserChatIndex object ID
+    createdAt: number; // Unix timestamp in ms
+    bio?: string; // Optional bio (dynamic field)
+    social?: Record<string, string>; // Social media links (dynamic fields)
+}
+
+export interface UserChatIndex {
+    id: string; // Object ID (shared object)
+    owner: string; // Wallet address
+    chatIds: string[]; // Array of chat room IDs
+    blocked: string[]; // Array of blocked addresses
 }
 
 export interface ChatRoom {
-    id: string; // Object ID
+    id: string; // Object ID (shared object)
     name: string;
-    host: string; // User ID
-    isPrivate: boolean;
+    creator: string; // Creator wallet address
+    isEncrypted: boolean;
+    members: string[]; // Array of member addresses
     messageCount: number;
-    encryptedMessageKey?: string; // For private rooms
-    memberCount?: number; // Computed from members
+    createdAt: number; // Unix timestamp in ms
+    encryptedKey?: Uint8Array | string; // Encrypted key for this user (if encrypted room)
 }
 
 export interface Message {
-    id: string; // Object ID
-    chatId: string;
-    text: string; // Encrypted for private rooms, supports Unicode emoji
-    sender: string; // User ID
+    sender: string; // Sender wallet address
+    contentType: number; // 0: Text, 1: Image, 2: File
+    content: string; // Message content or blob ID
     timestamp: number; // Unix timestamp in ms
-    tippedAmount: number; // In MIST (minimum 0.01 SUI = 10,000,000 MIST)
-    imageUrl: string; // Walrus IPFS URL
-    imageThumbnailUrl?: string; // Thumbnail URL for images
-    fileUrl?: string; // For file attachments (Walrus IPFS URL)
-    isEncrypted: boolean; // Frontend flag
-    isHighlighted?: boolean; // True if message contains tip
-}
-
-export interface Pass {
-    id: string; // Object ID
-    chatId: string;
-    encryptedMessageKey: string;
-    createdAt: number;
+    messageIndex: number; // Index in the chat room
 }
 
 export interface ChatMember {
-    userId: string;
-    joinedAt: number;
-    isMuted: boolean;
+    address: string; // Wallet address
+    joinedAt?: number; // Optional join timestamp
 }
 
-export interface TipRanking {
-    userId: string;
-    userName: string;
-    totalTipsReceived: number; // In MIST
-    totalTipsSent: number; // In MIST
-    rank: number;
-}
-
-export interface ChatRegistry {
-    id: string; // Object ID (shared object)
-    // Chat rooms registered via Dynamic Object Fields
-}
-
-// Constants
-export const MIN_TIP_AMOUNT_MIST = 10_000_000; // 0.01 SUI
-export const MESSAGE_RATE_LIMIT = 20; // messages per minute
-export const MESSAGES_PER_PAGE = 50;
-export const MAX_MESSAGES_DISPLAY = 500;
-export const MAX_IMAGE_SIZE_MB = 5;
-export const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
-
-// Package ID - should be set via environment variable
-export const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || '';
-
-// Module names
-export const MODULES = {
-    USER: 'user',
-    CHAT: 'chat',
-    MESSAGE: 'message',
-    PASS: 'pass',
-} as const;
+// Re-export constants from constants.ts
+export {
+    PACKAGE_ID,
+    APP_CONFIG_ID,
+    PROFILE_REGISTRY_ID,
+    MODULES,
+    MESSAGE_RATE_LIMIT,
+    MESSAGES_PER_PAGE,
+    MAX_MESSAGES_DISPLAY,
+    MAX_IMAGE_SIZE_MB,
+    MAX_IMAGE_SIZE_BYTES,
+    MESSAGE_CONTENT_TYPE,
+    SUI_NETWORK,
+    validateConstants,
+    areConstantsConfigured,
+} from './constants';
 

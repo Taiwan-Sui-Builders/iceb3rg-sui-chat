@@ -1,140 +1,112 @@
 // Message module contract interactions
+// Messages are part of the Chat module in the new contract
 
 import { Transaction, TransactionResult } from '@mysten/sui/transactions';
-import { PACKAGE_ID, MODULES, MIN_TIP_AMOUNT_MIST } from '../types';
+import { PACKAGE_ID, MODULES, APP_CONFIG_ID, MESSAGE_CONTENT_TYPE } from '../types';
 import type { Message } from '../types';
 
 const CHAT_MODULE = `${PACKAGE_ID}::${MODULES.CHAT}`;
 
 /**
- * Create a transaction to create a message (public chat)
- * Requires sender User ID and Clock object
- * Argument order: chat, text, sender, image_url, clock, ctx
+ * Create a transaction to send a message
+ * Messages are stored as dynamic fields in the ChatRoom
  */
-export function createMessageTransaction(
+export function sendMessageTransaction(
     tx: Transaction,
     chatId: string,
-    text: string,
-    senderUserId: string,
-    imageUrl: string = ''
+    contentType: number, // 0: Text, 1: Image, 2: File
+    content: string // Message text or blob ID
 ): TransactionResult {
     return tx.moveCall({
-        target: `${CHAT_MODULE}::create_message`,
+        target: `${CHAT_MODULE}::send_message`,
         arguments: [
+            tx.object(APP_CONFIG_ID),
             tx.object(chatId),
-            tx.pure.string(text),
-            tx.pure.id(senderUserId),
-            tx.pure.string(imageUrl),
+            tx.pure.u8(contentType),
+            tx.pure.string(content),
             tx.object('0x6'), // Clock object
         ],
     });
 }
 
 /**
- * Create a transaction to create a message with tip (public chat)
- * Requires sender User ID, tip Coin object, host User object, and Clock object
- * Argument order: chat, text, sender, image_url, payment, host_user, clock, ctx
+ * Create a transaction to send a text message
  */
-export function createMessageWithTipTransaction(
+export function sendTextMessageTransaction(
     tx: Transaction,
     chatId: string,
-    text: string,
-    senderUserId: string,
-    imageUrl: string,
-    tipCoin: string, // Coin object ID
-    hostUserObjectId: string
+    text: string
 ): TransactionResult {
-    return tx.moveCall({
-        target: `${CHAT_MODULE}::create_message_with_tip`,
-        arguments: [
-            tx.object(chatId),
-            tx.pure.string(text),
-            tx.pure.id(senderUserId),
-            tx.pure.string(imageUrl),
-            tx.object(tipCoin),
-            tx.object(hostUserObjectId),
-            tx.object('0x6'), // Clock object
-        ],
-    });
+    return sendMessageTransaction(tx, chatId, MESSAGE_CONTENT_TYPE.TEXT, text);
 }
 
 /**
- * Create a transaction to create a message in private chat with pass
- * Requires sender User ID, Pass object, and Clock object
- * Argument order: chat, text, sender, image_url, pass, clock, ctx
+ * Create a transaction to send an image message
  */
-export function createMessageWithPassTransaction(
+export function sendImageMessageTransaction(
     tx: Transaction,
     chatId: string,
-    text: string,
-    senderUserId: string,
-    imageUrl: string,
-    passId: string
+    imageBlobId: string // Walrus blob ID
 ): TransactionResult {
-    return tx.moveCall({
-        target: `${CHAT_MODULE}::create_message_with_pass`,
-        arguments: [
-            tx.object(chatId),
-            tx.pure.string(text),
-            tx.pure.id(senderUserId),
-            tx.pure.string(imageUrl),
-            tx.object(passId),
-            tx.object('0x6'), // Clock object
-        ],
-    });
+    return sendMessageTransaction(tx, chatId, MESSAGE_CONTENT_TYPE.IMAGE, imageBlobId);
 }
 
 /**
- * Create a transaction to create a message with tip in private chat
- * Requires sender User ID, Pass object, tip Coin object, host User object, and Clock object
- * Argument order: chat, text, sender, image_url, payment, pass, host_user, clock, ctx
+ * Create a transaction to send a file message
  */
-export function createMessageWithTipAndPassTransaction(
+export function sendFileMessageTransaction(
     tx: Transaction,
     chatId: string,
-    text: string,
-    senderUserId: string,
-    imageUrl: string,
-    tipCoin: string, // Coin object ID
-    passId: string,
-    hostUserObjectId: string
+    fileBlobId: string // Walrus blob ID
 ): TransactionResult {
-    return tx.moveCall({
-        target: `${CHAT_MODULE}::create_message_with_tip_and_pass`,
-        arguments: [
-            tx.object(chatId),
-            tx.pure.string(text),
-            tx.pure.id(senderUserId),
-            tx.pure.string(imageUrl),
-            tx.object(tipCoin),
-            tx.object(passId),
-            tx.object(hostUserObjectId),
-            tx.object('0x6'), // Clock object
-        ],
-    });
+    return sendMessageTransaction(tx, chatId, MESSAGE_CONTENT_TYPE.FILE, fileBlobId);
 }
 
 /**
- * Parse Message object from Sui object data
+ * Parse Message from dynamic field data
+ * Messages are stored as dynamic fields with sequence numbers as keys
  */
-export function parseMessageObject(data: any): Message | null {
-    if (!data?.content || data.content.dataType !== 'moveObject') {
+export function parseMessageObject(data: any, messageIndex: number): Message | null {
+    if (!data) {
         return null;
     }
 
-    const fields = data.content.fields as any;
-    const tippedAmount = Number(fields.tipped_amount || 0);
+    // Dynamic field objects have the value in data.content
+    // The Message struct is stored directly as the value
+    let fields: any;
+
+    if (data.content?.dataType === 'moveObject') {
+        fields = data.content.fields;
+    } else if (data.content?.dataType === 'moveValue') {
+        // If stored as moveValue, the fields might be directly in content
+        fields = data.content.value || data.content;
+    } else if (data.fields) {
+        fields = data.fields;
+    } else {
+        return null;
+    }
 
     return {
-        id: data.data.objectId,
-        chatId: fields.chat || '',
-        text: fields.text || '',
         sender: fields.sender || '',
+        contentType: Number(fields.content_type ?? 0),
+        content: fields.content || '',
         timestamp: Number(fields.timestamp || 0),
-        tippedAmount,
-        imageUrl: fields.image_url || '',
-        isEncrypted: false, // Will be set based on room type
-        isHighlighted: tippedAmount >= MIN_TIP_AMOUNT_MIST,
+        messageIndex,
     };
 }
 
+/**
+ * Helper to get message content type label
+ */
+export function getContentTypeLabel(contentType: number): string {
+    switch (contentType) {
+        case MESSAGE_CONTENT_TYPE.TEXT:
+            return 'Text';
+        case MESSAGE_CONTENT_TYPE.IMAGE:
+            return 'Image';
+        case MESSAGE_CONTENT_TYPE.FILE:
+            return 'File';
+        default:
+            return 'Unknown';
+    }
+}

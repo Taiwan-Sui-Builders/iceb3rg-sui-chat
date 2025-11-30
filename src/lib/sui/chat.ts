@@ -1,225 +1,138 @@
 // Chat module contract interactions
 
 import { Transaction, TransactionResult } from '@mysten/sui/transactions';
-import { PACKAGE_ID, MODULES } from '../types';
-import type { ChatRoom, ChatMember } from '../types';
+import { PACKAGE_ID, MODULES, APP_CONFIG_ID } from '../types';
+import type { ChatRoom, UserChatIndex } from '../types';
 
 const CHAT_MODULE = `${PACKAGE_ID}::${MODULES.CHAT}`;
 
 /**
- * Create a transaction to create a public chat
- * Requires User object to be passed
+ * Create a transaction to create a chat room
  */
-export function createPublicChatTransaction(
+export function createChatTransaction(
     tx: Transaction,
-    name: string,
-    userObjectId: string
+    params: {
+        userIndexId: string; // UserChatIndex object ID
+        name: string;
+        isEncrypted: boolean;
+        encryptedKey: Uint8Array | string; // Empty array for public chats
+    }
 ): TransactionResult {
-    return tx.moveCall({
-        target: `${CHAT_MODULE}::create_public_chat`,
-        arguments: [
-            tx.pure.string(name),
-            tx.object(userObjectId),
-        ],
-    });
-}
+    const encryptedKeyBytes = typeof params.encryptedKey === 'string'
+        ? Array.from(new TextEncoder().encode(params.encryptedKey))
+        : Array.from(params.encryptedKey);
 
-/**
- * Create a transaction to create a private chat
- * Requires User object to be passed
- */
-export function createPrivateChatTransaction(
-    tx: Transaction,
-    name: string,
-    encryptedMessageKey: string,
-    userObjectId: string
-): TransactionResult {
     return tx.moveCall({
-        target: `${CHAT_MODULE}::create_private_chat`,
+        target: `${CHAT_MODULE}::create_chat`,
         arguments: [
-            tx.pure.string(name),
-            tx.pure.string(encryptedMessageKey),
-            tx.object(userObjectId),
-        ],
-    });
-}
-
-/**
- * Create a transaction to create ChatRegistry
- */
-export function createChatRegistryTransaction(
-    tx: Transaction
-): TransactionResult {
-    return tx.moveCall({
-        target: `${CHAT_MODULE}::create_registry`,
-        arguments: [],
-    });
-}
-
-/**
- * Create a transaction to register chat in ChatRegistry
- */
-export function registerChatTransaction(
-    tx: Transaction,
-    registryId: string,
-    chatId: string,
-    chatName: string,
-    hostUserObjectId: string
-): TransactionResult {
-    return tx.moveCall({
-        target: `${CHAT_MODULE}::register_chat`,
-        arguments: [
-            tx.object(registryId),
-            tx.object(chatId),
-            tx.pure.string(chatName),
-            tx.object(hostUserObjectId),
-        ],
-    });
-}
-
-/**
- * Create a transaction to unregister chat from ChatRegistry
- */
-export function unregisterChatTransaction(
-    tx: Transaction,
-    registryId: string,
-    chatId: string,
-    chatName: string,
-    hostUserObjectId: string
-): TransactionResult {
-    return tx.moveCall({
-        target: `${CHAT_MODULE}::unregister_chat`,
-        arguments: [
-            tx.object(registryId),
-            tx.object(chatId),
-            tx.pure.string(chatName),
-            tx.object(hostUserObjectId),
+            tx.object(APP_CONFIG_ID),
+            tx.object(params.userIndexId),
+            tx.pure.string(params.name),
+            tx.pure.bool(params.isEncrypted),
+            tx.pure.vector('u8', encryptedKeyBytes),
+            tx.object('0x6'), // Clock object
         ],
     });
 }
 
 /**
  * Create a transaction to join a public chat
- * Requires User object and Clock object
  */
-export function joinPublicChatTransaction(
+export function joinChatTransaction(
     tx: Transaction,
     chatId: string,
-    userObjectId: string
+    userIndexId: string
 ): TransactionResult {
     return tx.moveCall({
-        target: `${CHAT_MODULE}::join_public_chat`,
+        target: `${CHAT_MODULE}::join_chat`,
         arguments: [
+            tx.object(APP_CONFIG_ID),
             tx.object(chatId),
-            tx.object(userObjectId),
-            tx.object('0x6'), // Clock object
+            tx.object(userIndexId),
         ],
     });
 }
 
 /**
- * Create a transaction to join a private chat with pass
- * Requires User object, Pass object, and Clock object
+ * Create a transaction to invite a user to an encrypted chat
  */
-export function joinPrivateChatTransaction(
+export function inviteToChatTransaction(
     tx: Transaction,
     chatId: string,
-    userObjectId: string,
-    passId: string
+    inviteeIndexId: string, // Invitee's UserChatIndex object ID
+    encryptedKeyForInvitee: Uint8Array | string // Encrypted key for the invitee
 ): TransactionResult {
+    const encryptedKeyBytes = typeof encryptedKeyForInvitee === 'string'
+        ? Array.from(new TextEncoder().encode(encryptedKeyForInvitee))
+        : Array.from(encryptedKeyForInvitee);
+
     return tx.moveCall({
-        target: `${CHAT_MODULE}::join_private_chat`,
+        target: `${CHAT_MODULE}::invite_to_chat`,
         arguments: [
+            tx.object(APP_CONFIG_ID),
             tx.object(chatId),
-            tx.object(userObjectId),
-            tx.object(passId),
-            tx.object('0x6'), // Clock object
+            tx.object(inviteeIndexId),
+            tx.pure.vector('u8', encryptedKeyBytes),
         ],
     });
 }
 
 /**
- * Create a transaction to update chat name (host only)
+ * Create a transaction to leave a chat room
  */
-export function updateChatNameTransaction(
+export function leaveChatTransaction(
     tx: Transaction,
     chatId: string,
-    newName: string,
-    hostUserObjectId: string
+    userIndexId: string
 ): TransactionResult {
     return tx.moveCall({
-        target: `${CHAT_MODULE}::update_name`,
+        target: `${CHAT_MODULE}::leave_chat`,
         arguments: [
+            tx.object(APP_CONFIG_ID),
             tx.object(chatId),
-            tx.pure.string(newName),
-            tx.object(hostUserObjectId),
+            tx.object(userIndexId),
         ],
     });
 }
 
 /**
- * Create a transaction to transfer host
- * Requires host User object
+ * Create a transaction to block a user
  */
-export function transferHostTransaction(
+export function blockUserTransaction(
     tx: Transaction,
-    chatId: string,
-    newHostUserId: string,
-    hostUserObjectId: string
+    userIndexId: string,
+    targetAddress: string
 ): TransactionResult {
     return tx.moveCall({
-        target: `${CHAT_MODULE}::transfer_host`,
+        target: `${CHAT_MODULE}::block_user`,
         arguments: [
-            tx.object(chatId),
-            tx.pure.id(newHostUserId),
-            tx.object(hostUserObjectId),
+            tx.object(APP_CONFIG_ID),
+            tx.object(userIndexId),
+            tx.pure.address(targetAddress),
         ],
     });
 }
 
 /**
- * Create a transaction to ban a user (host only)
- * Requires host User object and Clock object
+ * Create a transaction to unblock a user
  */
-export function banUserTransaction(
+export function unblockUserTransaction(
     tx: Transaction,
-    chatId: string,
-    bannedUserId: string,
-    hostUserObjectId: string
+    userIndexId: string,
+    targetAddress: string
 ): TransactionResult {
     return tx.moveCall({
-        target: `${CHAT_MODULE}::ban_user`,
+        target: `${CHAT_MODULE}::unblock_user`,
         arguments: [
-            tx.object(chatId),
-            tx.pure.id(bannedUserId),
-            tx.object(hostUserObjectId),
-            tx.object('0x6'), // Clock object
+            tx.object(APP_CONFIG_ID),
+            tx.object(userIndexId),
+            tx.pure.address(targetAddress),
         ],
     });
 }
 
 /**
- * Create a transaction to unban a user (host only)
- * Requires host User object
- */
-export function unbanUserTransaction(
-    tx: Transaction,
-    chatId: string,
-    unbannedUserId: string,
-    hostUserObjectId: string
-): TransactionResult {
-    return tx.moveCall({
-        target: `${CHAT_MODULE}::unban_user`,
-        arguments: [
-            tx.object(chatId),
-            tx.pure.id(unbannedUserId),
-            tx.object(hostUserObjectId),
-        ],
-    });
-}
-
-/**
- * Parse Chat object from Sui object data
+ * Parse ChatRoom object from Sui object data
  */
 export function parseChatObject(data: any): ChatRoom | null {
     if (!data?.content || data.content.dataType !== 'moveObject') {
@@ -227,29 +140,35 @@ export function parseChatObject(data: any): ChatRoom | null {
     }
 
     const fields = data.content.fields as any;
+    const members = fields.members || [];
+
     return {
         id: data.data.objectId,
         name: fields.name || '',
-        host: fields.host || '',
-        isPrivate: fields.is_private || false,
+        creator: fields.creator || '',
+        isEncrypted: fields.is_encrypted || false,
+        members: Array.isArray(members) ? members : [],
         messageCount: Number(fields.message_count || 0),
-        encryptedMessageKey: fields.encrypted_message_key || undefined,
+        createdAt: Number(fields.created_at || 0),
     };
 }
 
 /**
- * Parse ChatMember from Dynamic Object Field
+ * Parse UserChatIndex object from Sui object data
  */
-export function parseChatMember(data: any): ChatMember | null {
+export function parseUserChatIndexObject(data: any): UserChatIndex | null {
     if (!data?.content || data.content.dataType !== 'moveObject') {
         return null;
     }
 
     const fields = data.content.fields as any;
+    const chatIds = fields.chat_ids || [];
+    const blocked = fields.blocked || [];
+
     return {
-        userId: fields.user || '',
-        joinedAt: Number(fields.joined_at || 0),
-        isMuted: fields.is_muted || false,
+        id: data.data.objectId,
+        owner: fields.owner || '',
+        chatIds: Array.isArray(chatIds) ? chatIds : [],
+        blocked: Array.isArray(blocked) ? blocked : [],
     };
 }
-

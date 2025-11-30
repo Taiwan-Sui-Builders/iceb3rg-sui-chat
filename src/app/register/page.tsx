@@ -10,7 +10,7 @@ import { useSignPersonalMessage } from '@mysten/dapp-kit';
 import toast from 'react-hot-toast';
 import { Header } from '@/components/common/Header';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
-import { createUserTransaction } from '@/lib/sui/user';
+import { createProfileTransaction } from '@/lib/sui/profile';
 import { useEncryptionKeypair } from '@/hooks/useEncryption';
 import { toBase64 } from '@/lib/crypto';
 
@@ -21,9 +21,9 @@ export default function RegisterPage() {
   const { mutate: signPersonalMessage } = useSignPersonalMessage();
   const { loadKeypair, getPublicKeyBase64 } = useEncryptionKeypair();
 
-  const [name, setName] = useState('');
-  const [portraitUrl, setPortraitUrl] = useState('');
-  const [treasury, setTreasury] = useState(account?.address || '');
+  const [customId, setCustomId] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [avatarBlobId, setAvatarBlobId] = useState('');
   const [isGeneratingKey, setIsGeneratingKey] = useState(false);
 
   const handleRegister = async () => {
@@ -32,8 +32,13 @@ export default function RegisterPage() {
       return;
     }
 
-    if (!name.trim()) {
-      toast.error('Name is required');
+    if (!customId.trim()) {
+      toast.error('Custom ID is required');
+      return;
+    }
+
+    if (!displayName.trim()) {
+      toast.error('Display name is required');
       return;
     }
 
@@ -59,13 +64,16 @@ export default function RegisterPage() {
                 return;
               }
 
-              // Step 3: Create user transaction
+              // Step 3: Create profile transaction
               const tx = new Transaction();
-              createUserTransaction(tx, {
-                name: name.trim(),
-                portraitUrl: portraitUrl.trim() || '',
-                encryptionPublicKey: publicKeyBase64,
-                treasury: treasury || account.address,
+              // Convert base64 public key to Uint8Array
+              const publicKeyBytes = Uint8Array.from(atob(publicKeyBase64), c => c.charCodeAt(0));
+
+              createProfileTransaction(tx, {
+                customId: customId.trim(),
+                displayName: displayName.trim(),
+                avatarBlobId: avatarBlobId.trim() || '',
+                publicKey: publicKeyBytes,
               });
 
               // Step 4: Execute transaction
@@ -133,15 +141,33 @@ export default function RegisterPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+                Custom ID <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={customId}
+                onChange={(e) => setCustomId(e.target.value)}
+                maxLength={100}
+                className="w-full px-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-black dark:text-zinc-50"
+                placeholder="Enter a unique ID"
+                required
+              />
+              <p className="mt-1 text-xs text-zinc-500">
+                A unique identifier for your profile. Max 100 characters.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
                 Display Name <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
                 maxLength={100}
                 className="w-full px-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-black dark:text-zinc-50"
-                placeholder="Enter your name"
+                placeholder="Enter your display name"
                 required
               />
               <p className="mt-1 text-xs text-zinc-500">
@@ -151,41 +177,25 @@ export default function RegisterPage() {
 
             <div>
               <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
-                Portrait URL
-              </label>
-              <input
-                type="url"
-                value={portraitUrl}
-                onChange={(e) => setPortraitUrl(e.target.value)}
-                maxLength={500}
-                className="w-full px-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-black dark:text-zinc-50"
-                placeholder="https://example.com/avatar.jpg"
-              />
-              <p className="mt-1 text-xs text-zinc-500">
-                Max 500 characters
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
-                Treasury Address
+                Avatar Blob ID
               </label>
               <input
                 type="text"
-                value={treasury}
-                onChange={(e) => setTreasury(e.target.value)}
+                value={avatarBlobId}
+                onChange={(e) => setAvatarBlobId(e.target.value)}
+                maxLength={500}
                 className="w-full px-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-black dark:text-zinc-50"
-                placeholder={account.address}
+                placeholder="Walrus blob ID for avatar"
               />
               <p className="mt-1 text-xs text-zinc-500">
-                Address to receive tips. Defaults to your wallet address.
+                Walrus storage blob ID for your avatar image. Max 500 characters.
               </p>
             </div>
 
             <div className="flex space-x-4 pt-4">
               <button
                 onClick={handleRegister}
-                disabled={isPending || isGeneratingKey || !name.trim()}
+                disabled={isPending || isGeneratingKey || !customId.trim() || !displayName.trim()}
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
               >
                 {(isPending || isGeneratingKey) ? (

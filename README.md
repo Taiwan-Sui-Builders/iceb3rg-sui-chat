@@ -2,7 +2,20 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+### Environment Setup
+
+1. Copy the example environment file:
+   ```bash
+   cp env.example .env.local
+   ```
+
+2. Fill in your environment variables in `.env.local`:
+   - `NEXT_PUBLIC_SUI_NETWORK`: The Sui network to use (`devnet`, `testnet`, or `mainnet`)
+   - `NEXT_PUBLIC_PACKAGE_ID`: Your deployed smart contract package ID
+   - `NEXT_PUBLIC_APP_CONFIG_ID`: The AppConfig shared object ID
+   - `NEXT_PUBLIC_PROFILE_REGISTRY_ID`: The ProfileRegistry shared object ID
+
+3. Run the development server:
 
 ```bash
 npm run dev

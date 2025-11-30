@@ -6,44 +6,38 @@ import { parseChatObject } from '@/lib/sui/chat';
 import { PACKAGE_ID, MODULES } from '@/lib/types';
 import type { ChatRoom } from '@/lib/types';
 
-const CHAT_TYPE = `${PACKAGE_ID}::${MODULES.CHAT}::Chat`;
-
-// ChatRegistry object ID - should be set via environment variable or fetched
-const CHAT_REGISTRY_ID = process.env.NEXT_PUBLIC_CHAT_REGISTRY_ID || '';
+const CHAT_TYPE = `${PACKAGE_ID}::${MODULES.CHAT}::ChatRoom`;
 
 /**
- * Hook to get all chat rooms
- * Queries ChatRegistry dynamic fields to get all registered chat rooms
- * Note: ChatRegistry must be implemented in the smart contract
+ * Hook to get all chat rooms from a user's UserChatIndex
+ * This fetches chat rooms from the user's chat index
  */
-export function useChatRooms() {
+export function useChatRooms(chatIndexId: string | null) {
     const client = useSuiClient();
 
-    // Query ChatRegistry dynamic fields to get all chat room IDs
+    // First, get the UserChatIndex to get list of chat IDs
     const {
-        data: dynamicFields,
-        isLoading: isLoadingFields,
-        error: fieldsError,
-        refetch: refetchFields
+        data: chatIndexData,
+        isLoading: isLoadingIndex,
+        error: indexError,
+        refetch: refetchIndex
     } = useSuiClientQuery(
-        'getDynamicFields',
+        'getObject',
         {
-            parentId: CHAT_REGISTRY_ID,
+            id: chatIndexId || '',
+            options: {
+                showContent: true,
+                showType: true,
+            },
         },
         {
-            enabled: !!CHAT_REGISTRY_ID,
+            enabled: !!chatIndexId,
         }
     );
 
-    // Extract chat room IDs from dynamic fields
-    const chatRoomIds = dynamicFields?.data
-        ? dynamicFields.data.map((field: any) => {
-            // Extract chat room ID from dynamic field
-            // This depends on how ChatRegistry stores room IDs
-            // If ChatRegistry stores Chat objects directly, use field.objectId
-            // If it stores IDs, use field.name?.value
-            return field.objectId || field.name?.value;
-        }).filter(Boolean)
+    // Extract chat room IDs from UserChatIndex
+    const chatRoomIds: string[] = chatIndexData?.data?.content?.dataType === 'moveObject'
+        ? (chatIndexData.data.content.fields as any)?.chat_ids || []
         : [];
 
     // Fetch all chat room objects
@@ -80,14 +74,14 @@ export function useChatRooms() {
         : [];
 
     const refetch = async () => {
-        await refetchFields();
+        await refetchIndex();
         await refetchRooms();
     };
 
     return {
         rooms,
-        isLoading: isLoadingFields || isLoadingRooms,
-        error: fieldsError || roomsError,
+        isLoading: isLoadingIndex || isLoadingRooms,
+        error: indexError || roomsError,
         refetch,
     };
 }
@@ -110,4 +104,3 @@ export function useChatRoom(chatId: string | null) {
         }
     );
 }
-
