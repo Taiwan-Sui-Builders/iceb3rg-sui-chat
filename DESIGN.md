@@ -543,6 +543,19 @@ interface ChatRegistry {
 - `encrypted_message_key: String`
 - `created_at: u64`
 
+**UserRegistry (user.move):**
+- `id: UID` (shared object)
+- Dynamic Object Fields mapping addresses to User IDs
+- Allows lookup of users by their address
+- Used for user discovery
+
+**ChatRegistry (if implemented in chat.move):**
+- `id: UID` (shared object)
+- Dynamic Object Fields mapping chat room IDs
+- Allows discovery of all chat rooms
+- Enables search and filtering of rooms
+- Note: ChatRegistry may need to be added to the smart contract
+
 ---
 
 ## Security & Encryption
@@ -779,11 +792,19 @@ chat-web/src/
 - Displays tip amount in SUI (converted from MIST)
 
 **MessageInput:**
-- Text input
-- Emoji picker
+- Text input (supports Unicode emoji)
+- Emoji picker (most popular library - e.g., emoji-mart)
 - File/image upload
 - Tip amount input
 - Send button
+- Note: Emoji reactions will be designed later and stored off-chain
+
+**TipRankingBoard:**
+- Displays tip ranking for a chat room
+- Shows top tippers and tip recipients
+- Updates in real-time
+- Ranks users by total tips received
+- Displays user name, total tips (in SUI), and rank
 
 ---
 
