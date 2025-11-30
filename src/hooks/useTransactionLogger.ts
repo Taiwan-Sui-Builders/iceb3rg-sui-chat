@@ -4,7 +4,7 @@
  */
 
 import { useSignAndExecuteTransaction } from '@mysten/dapp-kit'
-import type { SuiSignAndExecuteTransactionOutput } from '@mysten/dapp-kit'
+import type { SuiSignAndExecuteTransactionOutput } from '@mysten/wallet-standard'
 import { createTransactionLogger } from '@/lib/sui/transaction-logger'
 import { useCallback } from 'react'
 

@@ -157,7 +157,7 @@ export function encryptMessage(message: string, key: Uint8Array): string {
   result.set(ciphertext, 1 + nonce.length);
 
   // base64 編碼
-  return sodium.to_base64(result, sodium.base64_variants.STANDARD);
+  return sodium.to_base64(result, sodium.base64_variants.ORIGINAL);
 }
 
 /**
@@ -179,7 +179,7 @@ export function decryptMessage(
 ): string | null {
   try {
     // base64 解碼
-    const data = sodium.from_base64(encryptedMessage, sodium.base64_variants.STANDARD);
+    const data = sodium.from_base64(encryptedMessage, sodium.base64_variants.ORIGINAL);
 
     // 解析 version
     const version = data[0];
@@ -208,12 +208,12 @@ export function decryptMessage(
  * Uint8Array 轉 base64 string
  */
 export function toBase64(data: Uint8Array): string {
-  return sodium.to_base64(data, sodium.base64_variants.STANDARD);
+  return sodium.to_base64(data, sodium.base64_variants.ORIGINAL);
 }
 
 /**
  * base64 string 轉 Uint8Array
  */
 export function fromBase64(base64: string): Uint8Array {
-  return sodium.from_base64(base64, sodium.base64_variants.STANDARD);
+  return sodium.from_base64(base64, sodium.base64_variants.ORIGINAL);
 }
