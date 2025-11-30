@@ -124,15 +124,47 @@ export function removeSocialTransaction(
  * Parse Profile object from Sui object data
  */
 export function parseProfileObject(data: any): Profile | null {
-    if (!data?.content || data.content.dataType !== 'moveObject') {
+    if (!data) {
         return null;
     }
 
-    const fields = data.content.fields as any;
+    // Handle different data structures from getOwnedObjects
+    let fields: any;
+    let objectId: string;
+
+    // Check if data has content (from getObject)
+    if (data.content && data.content.dataType === 'moveObject') {
+        fields = data.content.fields;
+        objectId = data.data?.objectId || data.content?.fields?.id || '';
+    }
+    // Check if data is directly the object (from getOwnedObjects)
+    else if (data.data) {
+        objectId = data.data.objectId || '';
+        if (data.data.content && data.data.content.dataType === 'moveObject') {
+            fields = data.data.content.fields;
+        } else if (data.content && data.content.fields) {
+            fields = data.content.fields;
+        } else {
+            return null;
+        }
+    }
+    // Try direct fields access
+    else if (data.fields) {
+        fields = data.fields;
+        objectId = data.objectId || data.id || '';
+    }
+    else {
+        return null;
+    }
+
+    if (!fields || !objectId) {
+        return null;
+    }
+
     const publicKey = fields.public_key;
 
     return {
-        id: data.data.objectId,
+        id: objectId,
         owner: fields.owner || '',
         customId: fields.custom_id || '',
         displayName: fields.display_name || '',

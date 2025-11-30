@@ -8,17 +8,25 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "ui:add": "npx shadcn@latest add"
   },
   "dependencies": {
     "@mysten/dapp-kit": "^0.19.9",
     "@mysten/sui": "^1.45.0",
+    "@radix-ui/react-label": "^2.1.8",
+    "@radix-ui/react-select": "^2.2.6",
+    "@radix-ui/react-slot": "^1.2.4",
     "@tanstack/react-query": "^5.90.11",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "libsodium-wrappers": "^0.7.15",
+    "lucide-react": "^0.555.0",
     "next": "16.0.5",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "react-hot-toast": "^2.6.0"
+    "react-hot-toast": "^2.6.0",
+    "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

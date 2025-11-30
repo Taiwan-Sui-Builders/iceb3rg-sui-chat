@@ -31,15 +31,26 @@ export function useUser() {
         }
     );
 
-    const profile: Profile | null = profileObject?.data?.[0]
-        ? parseProfileObject(profileObject.data[0])
+
+
+    // Check if profile exists (even if parsing fails)
+    const hasProfileData = !!(profileObject?.data && profileObject.data.length > 0);
+    const firstProfileData = profileObject?.data?.[0];
+
+    // Try to parse the profile
+    const profile: Profile | null = firstProfileData
+        ? parseProfileObject(firstProfileData)
         : null;
+
+    // If we have profile data but parsing returned null, we still consider the user registered
+    // This handles cases where the profile exists but parsing might have issues
+    const isRegistered = hasProfileData || !!profile;
 
     return {
         profile,
         isLoading,
         error,
-        isRegistered: !!profile,
+        isRegistered,
     };
 }
 

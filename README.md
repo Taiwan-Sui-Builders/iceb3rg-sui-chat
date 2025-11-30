@@ -33,6 +33,31 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## UI Components
+
+This project uses [shadcn/ui](https://ui.shadcn.com/) for UI components built on top of Radix UI and Tailwind CSS.
+
+### Adding Components
+
+To add a new shadcn/ui component, use:
+
+```bash
+npm run ui:add [component-name]
+# Example: npm run ui:add button
+# Example: npm run ui:add card dialog
+```
+
+Components will be added to `src/components/ui/` and can be imported like:
+
+```tsx
+import { Button } from '@/components/ui/button'
+```
+
+### Available Utilities
+
+- `cn()` - Utility function for merging Tailwind classes (from `@/lib/utils`)
+- CSS variables are configured in `src/app/globals.css` for theming
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
