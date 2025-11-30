@@ -17,9 +17,98 @@ export function useMessages(chatId: string | null) {
     const queryClient = useQueryClient();
     const subscriptionRef = useRef<(() => void) | null>(null);
     const lastMessageCountRef = useRef<number>(0);
+    const lastMismatchCheckRef = useRef<{ messageCount: number; messagesCount: number; lastMessageIndex: number } | null>(null);
+
+    // Helper function to invalidate all chat object queries (regardless of options)
+    const invalidateChatObjectQueries = () => {
+        if (!chatId) return
+        // Use predicate to match queries with different option structures
+        // This ensures both useMessages and useChatRoom queries are invalidated
+        queryClient.invalidateQueries({ 
+            predicate: (query) => {
+                const key = query.queryKey
+                if (!Array.isArray(key) || key.length < 3) return false
+                // Match queries like ['sui-client', 'getObject', chatId] or ['sui-client', 'getObject', { id: chatId, ... }]
+                return key[0] === 'sui-client' && 
+                       key[1] === 'getObject' && 
+                       (key[2] === chatId || (typeof key[2] === 'object' && key[2]?.id === chatId))
+            }
+        })
+    }
+
+    // Helper function to fetch and append only missing messages (instead of refetching everything)
+    const fetchAndAppendMissingMessages = async (fromIndex: number, toIndex: number) => {
+        if (!chatId || fromIndex > toIndex) return
+
+        try {
+            const missingIndices: number[] = []
+            for (let i = fromIndex; i <= toIndex; i++) {
+                missingIndices.push(i)
+            }
+
+            if (missingIndices.length === 0) return
+
+            console.log('[useMessages] Fetching and appending missing messages:', {
+                chatId,
+                missingIndices,
+                count: missingIndices.length
+            })
+
+            // Fetch only the missing messages
+            const messagePromises = missingIndices.map((index: number) =>
+                client.getDynamicFieldObject({
+                    parentId: chatId,
+                    name: {
+                        type: 'u64',
+                        value: index.toString(),
+                    },
+                })
+            )
+
+            const results = await Promise.all(messagePromises)
+            const newMessages = results
+                .map((result, idx) => {
+                    if (result.data) {
+                        return parseMessageObject(result.data, missingIndices[idx])
+                    }
+                    return null
+                })
+                .filter(Boolean) as Message[]
+
+            if (newMessages.length > 0) {
+                // Find and update all message queries for this chat
+                // This ensures we update the cache regardless of the exact query key structure
+                queryClient.setQueriesData<Message[]>(
+                    { queryKey: ['messages', chatId] },
+                    (oldMessages = []) => {
+                        // Combine old and new, remove duplicates, sort, and keep last N
+                        const combined = [...oldMessages, ...newMessages]
+                        // Remove duplicates by messageIndex
+                        const unique = combined.filter((msg, idx, arr) => 
+                            arr.findIndex(m => m.messageIndex === msg.messageIndex) === idx
+                        )
+                        unique.sort((a, b) => a.messageIndex - b.messageIndex)
+                        return unique.slice(-MAX_MESSAGES_DISPLAY)
+                    }
+                )
+                console.log('[useMessages] Successfully appended new messages:', {
+                    chatId,
+                    appendedCount: newMessages.length
+                })
+            }
+        } catch (error) {
+            console.error('[useMessages] Error fetching missing messages:', {
+                chatId,
+                fromIndex,
+                toIndex,
+                error: error instanceof Error ? error.message : String(error)
+            })
+            throw error
+        }
+    }
 
     // Get chat room to get message count
-    const { data: chatData } = useSuiClientQuery(
+    const { data: chatData, refetch: refetchChatRoom } = useSuiClientQuery(
         'getObject',
         {
             id: chatId || '',
@@ -138,27 +227,65 @@ export function useMessages(chatId: string | null) {
     });
 
     // Fetch message objects
+    // Use stable query key (only chatId) to avoid re-renders when indices change
     const {
         data: messagesData,
         isLoading: isLoadingMessages,
         error: messagesError,
     } = useQuery({
-        queryKey: ['messages', chatId, indicesToFetch],
+        queryKey: ['messages', chatId],
         queryFn: async () => {
-            if (indicesToFetch.length === 0) {
+            // Recalculate indicesToFetch inside queryFn to get latest indices
+            const currentDynamicFields = await client.getDynamicFields({
+                parentId: chatId!,
+            });
+
+            const currentMessageIndices: number[] = [];
+            if (currentDynamicFields?.data) {
+                currentDynamicFields.data.forEach((field: any) => {
+                    const name = field.name;
+                    if (name) {
+                        let index: number | null = null;
+
+                        if (typeof name === 'number') {
+                            index = name;
+                        } else if (name.type === 'u64' || name.type === '0x1::string::String') {
+                            if (typeof name.value === 'number') {
+                                index = name.value;
+                            } else if (typeof name.value === 'string') {
+                                const parsed = parseInt(name.value, 10);
+                                if (!isNaN(parsed)) {
+                                    index = parsed;
+                                }
+                            }
+                        } else if (typeof name.value === 'number') {
+                            index = name.value;
+                        }
+
+                        if (index !== null && index >= 0 && index < messageCount) {
+                            currentMessageIndices.push(index);
+                        }
+                    }
+                });
+            }
+
+            currentMessageIndices.sort((a, b) => a - b);
+            const currentIndicesToFetch = currentMessageIndices.slice(-MAX_MESSAGES_DISPLAY);
+
+            if (currentIndicesToFetch.length === 0) {
                 console.log('[useMessages] No indices to fetch');
                 return [];
             }
 
             console.log('[useMessages] Fetching message objects:', {
                 chatId,
-                count: indicesToFetch.length,
-                indices: indicesToFetch
+                count: currentIndicesToFetch.length,
+                indices: currentIndicesToFetch
             });
 
             // Fetch dynamic field objects
             // Note: We need to use getDynamicFieldObject for each message
-            const messagePromises = indicesToFetch.map((index: number) =>
+            const messagePromises = currentIndicesToFetch.map((index: number) =>
                 client.getDynamicFieldObject({
                     parentId: chatId!,
                     name: {
@@ -176,7 +303,7 @@ export function useMessages(chatId: string | null) {
                 const data = firstSuccess.data as any;
                 console.log('[useMessages] First successful result structure:', {
                     chatId,
-                    index: indicesToFetch[results.indexOf(firstSuccess)],
+                    index: currentIndicesToFetch[results.indexOf(firstSuccess)],
                     dataKeys: Object.keys(data),
                     hasContent: !!data.content,
                     hasData: !!data.data,
@@ -204,7 +331,7 @@ export function useMessages(chatId: string | null) {
             const parsedMessages = results
                 .map((result, idx) => {
                     if (result.data) {
-                        return parseMessageObject(result.data, indicesToFetch[idx]);
+                        return parseMessageObject(result.data, currentIndicesToFetch[idx]);
                     }
                     return null;
                 })
@@ -229,7 +356,7 @@ export function useMessages(chatId: string | null) {
 
             return parsedMessages;
         },
-        enabled: indicesToFetch.length > 0 && !!chatId,
+        enabled: !!chatId && messageCount > 0,
     });
 
     // Ensure messages are sorted ascending (oldest first, latest at bottom)
@@ -249,6 +376,85 @@ export function useMessages(chatId: string | null) {
         });
     }
 
+    // Monitor for missing messages by comparing last message index with message count
+    // Trigger refetch if the last message index is less than (messageCount - 1)
+    useEffect(() => {
+        if (!chatId || isLoading || isLoadingMessages) {
+            return
+        }
+
+        // Find the last (highest) message index in the loaded messages
+        // Messages are sorted ascending, so the last one has the highest index
+        const lastMessageIndex = messages.length > 0 
+            ? messages[messages.length - 1].messageIndex 
+            : -1
+
+        // Message indices are 0-based, so the last message should be at index (messageCount - 1)
+        // If lastMessageIndex < (messageCount - 1), we're missing newer messages
+        // Also check if we have no messages but messageCount > 0
+        const expectedLastIndex = messageCount - 1
+        const hasMissingMessages = messageCount > 0 && (
+            messages.length === 0 || 
+            lastMessageIndex < expectedLastIndex
+        )
+
+        if (hasMissingMessages) {
+            // Check if we've already handled this exact mismatch to avoid infinite loops
+            const lastCheck = lastMismatchCheckRef.current
+            const isSameMismatch = lastCheck && 
+                lastCheck.messageCount === messageCount && 
+                lastCheck.lastMessageIndex === lastMessageIndex
+
+            if (!isSameMismatch) {
+                const missingCount = expectedLastIndex - lastMessageIndex
+                console.log('[useMessages] Missing messages detected (last index < message count), triggering refetch:', {
+                    chatId,
+                    messageCount,
+                    lastMessageIndex,
+                    expectedLastIndex,
+                    missingCount,
+                    messagesCount: messages.length
+                })
+
+                // Update the ref to track this mismatch check
+                lastMismatchCheckRef.current = { 
+                    messageCount, 
+                    messagesCount: messages.length,
+                    lastMessageIndex 
+                }
+
+                // Invalidate and refetch chat room query to refresh message count
+                invalidateChatObjectQueries()
+                refetchChatRoom().catch((error) => {
+                    console.warn('[useMessages] Error refetching chat room:', {
+                        chatId,
+                        error: error instanceof Error ? error.message : String(error)
+                    })
+                })
+
+                // Fetch only missing messages and append them (instead of refetching everything)
+                fetchAndAppendMissingMessages(lastMessageIndex + 1, expectedLastIndex).catch((error) => {
+                    console.error('[useMessages] Error appending missing messages, falling back to refetch:', {
+                        chatId,
+                        error: error instanceof Error ? error.message : String(error)
+                    })
+                    // Fallback to full refetch on error
+                    refetch().catch((refetchError) => {
+                        console.error('[useMessages] Error in fallback refetch:', {
+                            chatId,
+                            error: refetchError instanceof Error ? refetchError.message : String(refetchError)
+                        })
+                    })
+                })
+            }
+        } else if (
+            (messageCount === 0 && messages.length === 0) ||
+            (messageCount > 0 && messages.length > 0 && lastMessageIndex === expectedLastIndex)
+        ) {
+            // Reset mismatch check when we have all messages (or no messages expected)
+            lastMismatchCheckRef.current = null
+        }
+    }, [chatId, messageCount, messages, isLoading, isLoadingMessages, refetch, refetchChatRoom, queryClient])
 
     // Subscribe to MessageSent events for real-time updates using gRPC
     useEffect(() => {
@@ -317,6 +523,15 @@ export function useMessages(chatId: string | null) {
                             checkpointKeys: checkpoint ? Object.keys(checkpoint) : []
                         });
 
+                        // Early return if checkpoint has no transactions - avoid unnecessary processing
+                        if (!executedTransactions || executedTransactions.length === 0) {
+                            console.log('[useMessages] Checkpoint has no transactions, skipping:', {
+                                chatId,
+                                checkpointSequence: response.cursor?.toString()
+                            })
+                            return // Skip this checkpoint entirely
+                        }
+
                         // Query events for MessageSent type
                         // ExecutedTransaction objects have transaction digest and events
                         if (executedTransactions.length > 0) {
@@ -368,6 +583,8 @@ export function useMessages(chatId: string | null) {
                                             eventCount: messageEvents.length
                                         });
 
+                                        let hasNewMessages = false
+
                                         // Process each MessageSent event
                                         for (const event of messageEvents) {
                                             const parsedJson = event.parsedJson as any;
@@ -384,10 +601,12 @@ export function useMessages(chatId: string | null) {
                                                     });
 
                                                     // Check if message already exists (deduplication)
-                                                    const existingMessages = queryClient.getQueryData<Message[]>(['messages', chatId, indicesToFetch]) || [];
+                                                    const existingMessages = queryClient.getQueryData<Message[]>(['messages', chatId]) || [];
                                                     const messageExists = existingMessages.some(m => m.messageIndex === messageIndex);
 
                                                     if (!messageExists) {
+                                                        hasNewMessages = true
+
                                                         // Fetch the new message
                                                         const result = await client.getDynamicFieldObject({
                                                             parentId: chatId,
@@ -400,9 +619,9 @@ export function useMessages(chatId: string | null) {
                                                         if (result.data) {
                                                             const newMessage = parseMessageObject(result.data, messageIndex);
                                                             if (newMessage) {
-                                                                // Update the query cache with the new message
-                                                                queryClient.setQueryData<Message[]>(
-                                                                    ['messages', chatId, indicesToFetch],
+                                                                // Update the query cache with the new message (append only)
+                                                                queryClient.setQueriesData<Message[]>(
+                                                                    { queryKey: ['messages', chatId] },
                                                                     (oldMessages = []) => {
                                                                         const exists = oldMessages.some(m => m.messageIndex === messageIndex);
                                                                         if (exists) return oldMessages;
@@ -414,13 +633,43 @@ export function useMessages(chatId: string | null) {
                                                                         return updated.slice(-MAX_MESSAGES_DISPLAY);
                                                                     }
                                                                 );
-
-                                                                queryClient.invalidateQueries({ queryKey: ['messages', chatId] });
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
+                                        }
+
+                                        // Trigger refetch when new messages are detected
+                                        if (hasNewMessages) {
+                                            console.log('[useMessages] New messages detected via gRPC, triggering refetch:', { chatId })
+                                            
+                                            // Update message count ref and invalidate chat room query
+                                            const currentChatData = await client.getObject({
+                                                id: chatId,
+                                                options: {
+                                                    showContent: true,
+                                                },
+                                            })
+                                            
+                                            const currentMessageCount = currentChatData?.data?.content?.dataType === 'moveObject'
+                                                ? Number((currentChatData.data.content.fields as any)?.message_count || 0)
+                                                : 0
+                                            
+                                            if (currentMessageCount > lastMessageCountRef.current) {
+                                                lastMessageCountRef.current = currentMessageCount
+                                            }
+
+                                            // Invalidate and refetch chat room query to update message count
+                                            invalidateChatObjectQueries()
+                                            await refetchChatRoom().catch((error) => {
+                                                console.warn('[useMessages] Error refetching chat room:', {
+                                                    chatId,
+                                                    error: error instanceof Error ? error.message : String(error)
+                                                })
+                                            })
+
+                                            // Messages are already appended to cache above, no need to refetch
                                         }
                                     }
                                 } catch (txError) {
@@ -433,17 +682,80 @@ export function useMessages(chatId: string | null) {
                                 }
                             }
                         } else {
+                            // Check if checkpoint has any transactions - if not, skip processing
+                            const hasTransactions = executedTransactions && executedTransactions.length > 0
+                            
+                            if (!hasTransactions) {
+                                // Checkpoint has no transactions, skip to avoid unnecessary refetches
+                                console.log('[useMessages] Checkpoint has no transactions, skipping:', {
+                                    chatId,
+                                    checkpointSequence: response.cursor?.toString()
+                                })
+                                return // Skip this checkpoint
+                            }
+                            
                             // Fallback: just trigger a refetch if we can't get transaction digests
-                            console.log('[useMessages] Checkpoint received, triggering refetch:', { chatId });
-                            await refetch();
+                            console.log('[useMessages] Checkpoint received with transactions, triggering refetch:', {
+                                chatId,
+                                transactionCount: executedTransactions.length
+                            });
+                            
+                            // Invalidate and refetch chat room query to refresh message count
+                            invalidateChatObjectQueries()
+                            await refetchChatRoom().catch((error) => {
+                                console.warn('[useMessages] Error refetching chat room:', {
+                                    chatId,
+                                    error: error instanceof Error ? error.message : String(error)
+                                })
+                            })
+                            
+                            // Try to append missing messages instead of full refetch
+                            const currentMessages = queryClient.getQueryData<Message[]>(['messages', chatId]) || []
+                            const currentLastIndex = currentMessages.length > 0 
+                                ? currentMessages[currentMessages.length - 1].messageIndex 
+                                : -1
+                            // Get message count from chat room
+                            const chatData = await client.getObject({
+                                id: chatId,
+                                options: { showContent: true },
+                            })
+                            const msgCount = chatData?.data?.content?.dataType === 'moveObject'
+                                ? Number((chatData.data.content.fields as any)?.message_count || 0)
+                                : 0
+                            const expectedLastIndex = msgCount - 1
+                            if (currentLastIndex < expectedLastIndex) {
+                                await fetchAndAppendMissingMessages(currentLastIndex + 1, expectedLastIndex).catch(() => {
+                                    refetch() // Fallback
+                                })
+                            }
                         }
                     } catch (error) {
                         console.error('[useMessages] Error processing checkpoint:', {
                             chatId,
                             error: error instanceof Error ? error.message : String(error)
                         });
-                        // Fallback to polling on error
-                        await refetch();
+                        
+                        // Invalidate and refetch chat room query to refresh message count
+                        invalidateChatObjectQueries()
+                        await refetchChatRoom().catch((error) => {
+                            console.warn('[useMessages] Error refetching chat room:', {
+                                chatId,
+                                error: error instanceof Error ? error.message : String(error)
+                            })
+                        })
+                        
+                        // Fallback: try to append missing messages instead of full refetch
+                        const currentMessages = queryClient.getQueryData<Message[]>(['messages', chatId]) || []
+                        const currentLastIndex = currentMessages.length > 0 
+                            ? currentMessages[currentMessages.length - 1].messageIndex 
+                            : -1
+                        const expectedLastIndex = messageCount - 1
+                        if (currentLastIndex < expectedLastIndex) {
+                            await fetchAndAppendMissingMessages(currentLastIndex + 1, expectedLastIndex).catch(() => {
+                                // Fallback to refetch only if append fails
+                                refetch()
+                            })
+                        }
                     }
                 }
             });
@@ -528,7 +840,8 @@ export function useMessages(chatId: string | null) {
                     newMessageCount: currentMessageCount - lastKnownCount
                 });
 
-                // Only refetch if message count has increased
+                // Refetch if message count has increased
+                // The mismatch check is handled by the separate useEffect above
                 if (currentMessageCount > lastKnownCount) {
                     console.log('[useMessages] Message count increased, fetching new messages:', {
                         chatId,
@@ -540,8 +853,26 @@ export function useMessages(chatId: string | null) {
                     // Update the ref before refetching
                     lastMessageCountRef.current = currentMessageCount;
 
-                    // Refetch messages
-                    await refetch();
+                    // Invalidate and refetch chat room query to refresh message count
+                    invalidateChatObjectQueries()
+                    await refetchChatRoom().catch((error) => {
+                        console.warn('[useMessages] Error refetching chat room:', {
+                            chatId,
+                            error: error instanceof Error ? error.message : String(error)
+                        })
+                    })
+
+                    // Append missing messages instead of full refetch
+                    const currentMessages = queryClient.getQueryData<Message[]>(['messages', chatId]) || []
+                    const currentLastIndex = currentMessages.length > 0 
+                        ? currentMessages[currentMessages.length - 1].messageIndex 
+                        : -1
+                    const expectedLastIndex = currentMessageCount - 1
+                    if (currentLastIndex < expectedLastIndex) {
+                        await fetchAndAppendMissingMessages(currentLastIndex + 1, expectedLastIndex).catch(() => {
+                            refetch() // Fallback
+                        })
+                    }
                 } else {
                     console.log('[useMessages] No new messages, skipping refetch:', {
                         chatId,
@@ -568,7 +899,7 @@ export function useMessages(chatId: string | null) {
             }
             subscriptionRef.current = null;
         };
-    }, [chatId, client, queryClient, refetch]);
+    }, [chatId, client, queryClient, refetch, refetchChatRoom]);
 
     console.log('[useMessages] Final messages state:', {
         chatId,

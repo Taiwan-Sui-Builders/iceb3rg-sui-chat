@@ -24,14 +24,42 @@ export default function ChatRoomPage() {
   const router = useRouter()
   const params = useParams()
   const account = useCurrentAccount()
-  const { isRegistered } = useUser()
+  const { isRegistered, isLoading: isLoadingUser } = useUser()
 
   // Ensure chatId is always defined (even if null) before hooks use it
   const chatId = (params?.id as string | undefined) || null
 
-  const { data: chatRoomData, isLoading: isLoadingRoom, error: roomError } = useChatRoom(chatId)
+  // Log chatId to debug refresh issues
+  useEffect(() => {
+    console.log('[ChatRoomPage] Route params:', {
+      params,
+      chatId,
+      url: typeof window !== 'undefined' ? window.location.href : 'server'
+    })
+  }, [params, chatId])
+
+  const { data: chatRoomData, isLoading: isLoadingRoom, error: roomError, refetch: refetchChatRoom } = useChatRoom(chatId)
   const { messages, messageCount, isLoading: isLoadingMessages, error: messagesError, refetch: refetchMessages } = useMessages(chatId)
   const { execute: executeSponsoredTx, isPending } = useSponsoredTransaction()
+
+  // Log errors to debug redirect issues
+  useEffect(() => {
+    if (roomError) {
+      console.error('[ChatRoomPage] Room error:', {
+        chatId,
+        error: roomError,
+        errorMessage: roomError?.message,
+        errorCode: (roomError as any)?.code
+      })
+    }
+    if (messagesError) {
+      console.error('[ChatRoomPage] Messages error:', {
+        chatId,
+        error: messagesError,
+        errorMessage: messagesError?.message
+      })
+    }
+  }, [chatId, roomError, messagesError])
 
   // Log messages hook usage
   useEffect(() => {
@@ -48,17 +76,36 @@ export default function ChatRoomPage() {
   const [messageText, setMessageText] = useState('')
   const [isSending, setIsSending] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
 
-  // Redirect if not registered
+  // Redirect if not registered (but only if we have account, confirmed not registered, and user data is loaded)
   useEffect(() => {
-    if (account && !isRegistered) {
+    // Wait for user data to load before redirecting to avoid false redirects on refresh
+    if (account && !isLoadingUser && !isRegistered) {
+      console.log('[ChatRoomPage] Redirecting to register - user not registered')
       router.push('/register')
     }
-  }, [account, isRegistered, router])
+  }, [account, isRegistered, isLoadingUser, router])
 
-  // Scroll to bottom when messages change
+  // Ensure chatId is valid before proceeding
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (!chatId && params?.id) {
+      console.warn('[ChatRoomPage] Invalid chatId from params:', { params, chatId })
+    }
+  }, [chatId, params])
+
+  // Scroll to bottom when new messages arrive, but only if user is near the bottom
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    // Check if user is near the bottom (within 100px)
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
+
+    // Only auto-scroll if user is near bottom or if it's the first load
+    if (isNearBottom || messages.length <= 1) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages])
 
   const handleSendMessage = async () => {
@@ -124,7 +171,8 @@ export default function ChatRoomPage() {
   const chatRoom = chatRoomData ? parseChatObject(chatRoomData) : null
 
   // Don't render content if redirecting (after all hooks)
-  if (account && !isRegistered) {
+  // But wait for user data to load to avoid false redirects on refresh
+  if (account && !isLoadingUser && !isRegistered) {
     return null
   }
 
@@ -159,15 +207,38 @@ export default function ChatRoomPage() {
   }
 
   if (error || !chatRoom) {
+    // Don't redirect, just show error - allow user to stay on page
+    // This handles cases where chat room might not be in user's list but is accessible
+    console.log('[ChatRoomPage] Showing error state:', {
+      chatId,
+      hasError: !!error,
+      hasChatRoom: !!chatRoom,
+      errorMessage: error?.message,
+      isLoadingRoom,
+      isLoadingMessages
+    })
+
     return (
       <div className="min-h-screen bg-background">
         <Header />
         <main className="max-w-4xl mx-auto px-4 py-8">
+          <div className="mb-4">
+            <Button
+              variant="ghost"
+              onClick={() => router.push('/rooms')}
+              className="mb-2"
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Rooms
+            </Button>
+          </div>
           <ErrorMessage
             message={error?.message || 'Chat room not found'}
             onRetry={() => {
               if (error) {
-                router.refresh()
+                console.log('[ChatRoomPage] Retrying after error...')
+                refetchChatRoom()
+                refetchMessages()
               }
             }}
           />
@@ -230,7 +301,7 @@ export default function ChatRoomPage() {
 
         {/* Messages */}
         <Card className="flex-1 flex flex-col mb-4">
-          <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
+          <CardContent ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />

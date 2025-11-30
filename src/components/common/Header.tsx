@@ -62,16 +62,17 @@ export function Header({ title = 'Sui Chat' }: HeaderProps) {
                 >
                   Users
                 </Link>
+                <Link
+                  href={`/users/${account.address}`}
+                  className="text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:text-black dark:hover:text-zinc-50 transition-colors"
+                >
+                  {profile.displayName}
+                </Link>
               </>
             )}
 
             {account ? (
               <div className="flex items-center gap-3">
-                {/* Profile name or address */}
-                <span className="text-sm text-zinc-600 dark:text-zinc-400">
-                  {profile?.displayName || truncateAddress(account.address)}
-                </span>
-
                 {/* Disconnect button */}
                 <button
                   onClick={() => disconnect()}

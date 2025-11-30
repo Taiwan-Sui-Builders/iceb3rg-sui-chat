@@ -193,31 +193,41 @@ export function parseChatObject(data: any): ChatRoom | null {
         return null;
     }
 
-    const members = fields.members || [];
+    // Parse members from VecSet<address> - Sui serializes VecSet as an array
+    // Always use members.length to get the count, not a separate field
+    let members: string[] = [];
+    if (fields.members) {
+        if (Array.isArray(fields.members)) {
+            members = fields.members;
+        } else if (fields.members.contents && Array.isArray(fields.members.contents)) {
+            // Handle VecSet structure if it has a contents field
+            members = fields.members.contents;
+        }
+    }
 
     const parsedRoom = {
         id: objectId,
         name: fields.name || '',
         creator: fields.creator || '',
         isEncrypted: fields.is_encrypted || false,
-        members: Array.isArray(members) ? members : [],
+        members: members, // Use members.length for member count
         messageCount: Number(fields.message_count || 0),
         createdAt: Number(fields.created_at || 0),
     };
 
     console.log('[parseChatObject] Parsed chat room:', {
-        objectId: data.data.objectId,
+        objectId: data.data?.objectId || objectId,
         name: parsedRoom.name,
         creator: parsedRoom.creator,
         isEncrypted: parsedRoom.isEncrypted,
-        membersCount: parsedRoom.members.length,
+        memberCount: parsedRoom.members.length, // Always use members.length
         messageCount: parsedRoom.messageCount,
         createdAt: parsedRoom.createdAt,
         rawFields: {
             name: fields.name,
             creator: fields.creator,
             is_encrypted: fields.is_encrypted,
-            members: Array.isArray(members) ? `${members.length} members` : 'not an array',
+            members: Array.isArray(fields.members) ? `${fields.members.length} members` : typeof fields.members,
             message_count: fields.message_count,
             created_at: fields.created_at
         }
@@ -244,4 +254,91 @@ export function parseUserChatIndexObject(data: any): UserChatIndex | null {
         chatIds: Array.isArray(chatIds) ? chatIds : [],
         blocked: Array.isArray(blocked) ? blocked : [],
     };
+}
+
+/**
+ * Get encrypted key for a user from a chat room
+ * The encrypted key is stored as a dynamic field with the user's address as the key
+ * In Move: dynamic_field::add(&mut chat_room.id, sender, encrypted_key);
+ * So the key type is 'address' and value type is 'vector<u8>'
+ */
+export async function getEncryptedKeyFromChatRoom(
+    client: any,
+    chatId: string,
+    userAddress: string
+): Promise<Uint8Array | null> {
+    try {
+        // Get the dynamic field object for the user's encrypted key
+        // The key is the user's address, value is vector<u8> (encrypted key)
+        const dynamicFieldObject = await client.getDynamicFieldObject({
+            parentId: chatId,
+            name: {
+                type: 'address',
+                value: userAddress,
+            },
+        });
+
+        if (!dynamicFieldObject.data) {
+            console.warn('[getEncryptedKeyFromChatRoom] No dynamic field data found for address:', userAddress);
+            return null;
+        }
+
+        // Extract the encrypted key from the dynamic field
+        // The value is stored as vector<u8> which Sui serializes as an array
+        const data = dynamicFieldObject.data as any;
+        let encryptedKey: Uint8Array | null = null;
+
+        // Try different paths to extract the value
+        // Dynamic field value structure can vary
+        if (data.content) {
+            const content = data.content;
+            // Check if value is directly in content
+            if (content.value) {
+                if (Array.isArray(content.value)) {
+                    encryptedKey = new Uint8Array(content.value);
+                } else if (typeof content.value === 'string') {
+                    // If it's a string, try to decode it
+                    try {
+                        encryptedKey = new Uint8Array(
+                            content.value.match(/.{1,2}/g)?.map((byte: string) => parseInt(byte, 16)) || []
+                        );
+                    } catch {
+                        // Try base64
+                        const { fromBase64 } = await import('@/lib/crypto');
+                        encryptedKey = fromBase64(content.value);
+                    }
+                }
+            }
+            // Check if value is in content.fields
+            if (!encryptedKey && content.fields?.value) {
+                if (Array.isArray(content.fields.value)) {
+                    encryptedKey = new Uint8Array(content.fields.value);
+                }
+            }
+        }
+
+        // Check data.data.content structure
+        if (!encryptedKey && data.data?.content) {
+            const content = data.data.content;
+            if (content.value && Array.isArray(content.value)) {
+                encryptedKey = new Uint8Array(content.value);
+            } else if (content.fields?.value && Array.isArray(content.fields.value)) {
+                encryptedKey = new Uint8Array(content.fields.value);
+            }
+        }
+
+        if (!encryptedKey) {
+            console.warn('[getEncryptedKeyFromChatRoom] Could not extract encrypted key from dynamic field:', {
+                hasData: !!data,
+                hasContent: !!data?.content,
+                hasDataContent: !!data?.data?.content,
+                dataKeys: data ? Object.keys(data) : []
+            });
+        }
+
+        return encryptedKey;
+    } catch (error) {
+        console.error('[getEncryptedKeyFromChatRoom] Error:', error);
+        return null;
+    }
 }
