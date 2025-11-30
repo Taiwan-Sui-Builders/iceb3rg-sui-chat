@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Loader2, Plus, Search, MessageSquare, Users, Lock, Globe } from 'lucide-react'
+import { Loader2, Plus, Search, MessageSquare, Users, Lock, Globe, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type SortOption = 'name' | 'members' | 'messages'
@@ -80,21 +80,52 @@ export default function RoomsPage() {
     return sorted
   }, [rooms, filter, searchQuery, sortBy])
 
-  // Don't render content if redirecting (after all hooks)
+  // Show registration required message while redirecting
   if (account && !isRegistered) {
-    return null
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="max-w-2xl mx-auto px-4 py-8">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex flex-col items-center text-center py-8">
+                <div className="p-3 bg-amber-100 dark:bg-amber-900/30 rounded-full mb-4">
+                  <AlertCircle className="h-8 w-8 text-amber-600 dark:text-amber-500" />
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Registration Required</h2>
+                <p className="text-muted-foreground mb-4">
+                  You need to create a profile before you can access chat rooms.
+                </p>
+                <Button asChild>
+                  <Link href="/register">Create Profile</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    )
   }
 
   if (!account) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <main className="max-w-7xl mx-auto px-4 py-8">
+        <main className="max-w-2xl mx-auto px-4 py-8">
           <Card>
             <CardContent className="pt-6">
-              <p className="text-center text-muted-foreground">
-                Please connect your wallet to view chat rooms.
-              </p>
+              <div className="flex flex-col items-center text-center py-8">
+                <div className="p-3 bg-primary/10 rounded-full mb-4">
+                  <MessageSquare className="h-8 w-8 text-primary" />
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Welcome to Sui Chat</h2>
+                <p className="text-muted-foreground mb-4">
+                  Sign in with Google to view and join chat rooms.
+                </p>
+                <Button asChild>
+                  <Link href="/">Sign In</Link>
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </main>

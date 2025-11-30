@@ -1,39 +1,24 @@
 'use client'
 
-import { useCurrentAccount, useCurrentWallet } from '@mysten/dapp-kit'
-import { useMemo } from 'react'
-
-export type AuthMethod = 'wallet' | 'zklogin' | null
+import { useCurrentAccount } from '@mysten/dapp-kit'
 
 /**
- * Hook to detect current authentication method
- * Returns 'zklogin' if connected via Enoki/Google, 'wallet' for traditional wallets
+ * Hook to check authentication status
+ * Since we only support zkLogin, this is simplified
  */
 export function useAuthMethod(): {
-  authMethod: AuthMethod
-  isZkLogin: boolean
-  isWallet: boolean
   isConnected: boolean
+  isZkLogin: boolean  // Always true when connected (kept for compatibility)
   address: string | undefined
 } {
   const account = useCurrentAccount()
-  const { currentWallet } = useCurrentWallet()
-
-  const authMethod = useMemo<AuthMethod>(() => {
-    if (!currentWallet || !account) return null
-
-    const walletName = currentWallet.name.toLowerCase()
-    if (walletName.includes('google') || walletName.includes('enoki')) {
-      return 'zklogin'
-    }
-    return 'wallet'
-  }, [currentWallet, account])
 
   return {
-    authMethod,
-    isZkLogin: authMethod === 'zklogin',
-    isWallet: authMethod === 'wallet',
     isConnected: !!account,
+    isZkLogin: !!account,  // Always zkLogin when connected
     address: account?.address,
   }
 }
+
+// Type export for compatibility
+export type AuthMethod = 'zklogin' | null

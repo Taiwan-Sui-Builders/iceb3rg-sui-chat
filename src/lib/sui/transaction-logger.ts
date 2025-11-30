@@ -5,6 +5,10 @@
 
 import type { SuiTransactionBlockResponse, SuiTransactionBlockResponseOptions } from '@mysten/sui/client'
 import type { SuiSignAndExecuteTransactionOutput } from '@mysten/wallet-standard'
+import type { SponsoredTransactionResult } from '@/hooks/useSponsoredTransaction'
+
+// Union type for all transaction result types
+type TransactionResult = SuiTransactionBlockResponse | SuiSignAndExecuteTransactionOutput | SponsoredTransactionResult
 
 const LOG_PREFIX = '[Sui Transaction]'
 
@@ -41,24 +45,24 @@ export function logTransactionStart(
  */
 export function logTransactionSuccess(
   functionName: string,
-  result: SuiTransactionBlockResponse | SuiSignAndExecuteTransactionOutput,
+  result: TransactionResult,
   options?: SuiTransactionBlockResponseOptions
 ) {
   if (typeof window === 'undefined') return // Only log in browser
 
   console.group(`${LOG_PREFIX} ✅ Success: ${functionName}`)
-  console.log('Transaction Digest:', result.digest)
+  console.log('Transaction Digest:', result.digest || 'N/A')
   console.log('Timestamp:', new Date().toISOString())
 
-  // Handle different response types
+  // Handle different response types - cast to any for flexible logging
   const effects = typeof result.effects === 'string'
     ? null
-    : result.effects
+    : (result.effects as any)
 
   console.log('Transaction Status:', effects?.status)
 
   // Log effects
-  if (effects) {
+  if (effects && typeof effects === 'object') {
     console.group('Effects:')
     console.log('Status:', effects.status)
     console.log('Gas Used:', effects.gasUsed)
@@ -68,11 +72,11 @@ export function logTransactionSuccess(
     // Log created objects
     if (effects.created && effects.created.length > 0) {
       console.group('Created Objects:')
-      effects.created.forEach((obj, index) => {
+      effects.created.forEach((obj: any, index: number) => {
         console.log(`[${index}]`, {
-          objectId: obj.reference.objectId,
+          objectId: obj.reference?.objectId,
           owner: obj.owner,
-          version: obj.reference.version,
+          version: obj.reference?.version,
         })
       })
       console.groupEnd()
@@ -81,11 +85,11 @@ export function logTransactionSuccess(
     // Log mutated objects
     if (effects.mutated && effects.mutated.length > 0) {
       console.group('Mutated Objects:')
-      effects.mutated.forEach((obj, index) => {
+      effects.mutated.forEach((obj: any, index: number) => {
         console.log(`[${index}]`, {
-          objectId: obj.reference.objectId,
+          objectId: obj.reference?.objectId,
           owner: obj.owner,
-          version: obj.reference.version,
+          version: obj.reference?.version,
         })
       })
       console.groupEnd()
@@ -94,7 +98,7 @@ export function logTransactionSuccess(
     // Log shared objects
     if (effects.sharedObjects && effects.sharedObjects.length > 0) {
       console.group('Shared Objects:')
-      effects.sharedObjects.forEach((obj, index) => {
+      effects.sharedObjects.forEach((obj: any, index: number) => {
         console.log(`[${index}]`, {
           objectId: obj.objectId,
           version: obj.version,
@@ -104,9 +108,9 @@ export function logTransactionSuccess(
     }
 
     // Log events (only available on SuiTransactionBlockResponse)
-    if ('events' in result && result.events && result.events.length > 0) {
+    if ('events' in result && result.events && Array.isArray(result.events) && result.events.length > 0) {
       console.group('Events:')
-      result.events.forEach((event, index) => {
+      result.events.forEach((event: any, index: number) => {
         console.log(`[${index}]`, {
           type: event.type,
           packageId: event.packageId,
@@ -128,18 +132,18 @@ export function logTransactionSuccess(
   }
 
   // Log object changes (only available on SuiTransactionBlockResponse)
-  if ('objectChanges' in result && result.objectChanges && result.objectChanges.length > 0) {
+  if ('objectChanges' in result && result.objectChanges && Array.isArray(result.objectChanges) && result.objectChanges.length > 0) {
     console.group('Object Changes:')
-    result.objectChanges.forEach((change, index) => {
+    result.objectChanges.forEach((change: any, index: number) => {
       console.log(`[${index}]`, change)
     })
     console.groupEnd()
   }
 
   // Log balance changes (only available on SuiTransactionBlockResponse)
-  if ('balanceChanges' in result && result.balanceChanges && result.balanceChanges.length > 0) {
+  if ('balanceChanges' in result && result.balanceChanges && Array.isArray(result.balanceChanges) && result.balanceChanges.length > 0) {
     console.group('Balance Changes:')
-    result.balanceChanges.forEach((change, index) => {
+    result.balanceChanges.forEach((change: any, index: number) => {
       console.log(`[${index}]`, change)
     })
     console.groupEnd()
@@ -177,7 +181,7 @@ export function createTransactionLogger(functionName: string) {
   return {
     logStart: (params: Record<string, any>, transaction?: any) =>
       logTransactionStart(functionName, params, transaction),
-    logSuccess: (result: SuiTransactionBlockResponse | SuiSignAndExecuteTransactionOutput) =>
+    logSuccess: (result: TransactionResult) =>
       logTransactionSuccess(functionName, result),
     logError: (error: any, params?: Record<string, any>) =>
       logTransactionError(functionName, error, params),

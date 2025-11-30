@@ -85,8 +85,13 @@ export function useZkLoginKeypair(options?: UseZkLoginKeypairOptions) {
     keypair: Keypair
     publicKeyBase64: string
   } | null> => {
+    console.log('[useZkLoginKeypair] === Starting keypair derivation ===')
+    console.log('[useZkLoginKeypair] isZkLogin:', isZkLogin)
+    console.log('[useZkLoginKeypair] currentWallet:', currentWallet?.name)
+
     if (!isZkLogin) {
       const err = new Error('Not connected with zkLogin')
+      console.error('[useZkLoginKeypair] Error:', err.message)
       setState(prev => ({ ...prev, error: err }))
       onError?.(err)
       return null
@@ -96,23 +101,37 @@ export function useZkLoginKeypair(options?: UseZkLoginKeypairOptions) {
 
     try {
       // 確保 crypto 已初始化
+      console.log('[useZkLoginKeypair] Step 1: Initializing crypto...')
       await initCrypto()
+      console.log('[useZkLoginKeypair] Step 1: Crypto initialized')
 
       // 1. 從錢包取得 session 資料
+      console.log('[useZkLoginKeypair] Step 2: Getting zkLogin session data...')
       const sessionData = await getZkLoginSessionData(currentWallet)
       if (!sessionData) {
         throw new Error('Could not get zkLogin session data. Try reconnecting.')
       }
+      console.log('[useZkLoginKeypair] Step 2: Session data obtained:', {
+        hasJwt: !!sessionData.jwt,
+        sub: sessionData.sub?.substring(0, 10) + '...',
+        iss: sessionData.iss,
+        aud: sessionData.aud,
+      })
 
       // 2. 檢查 JWT 是否過期
+      console.log('[useZkLoginKeypair] Step 3: Checking JWT expiry...')
       if (isJwtExpired(sessionData.jwt)) {
         throw new Error('JWT has expired. Please reconnect.')
       }
+      console.log('[useZkLoginKeypair] Step 3: JWT is valid')
 
       // 3. 取得 userSalt
+      console.log('[useZkLoginKeypair] Step 4: Fetching user salt...')
       const { userSalt } = await fetchUserSalt(sessionData.jwt)
+      console.log('[useZkLoginKeypair] Step 4: User salt obtained, length:', userSalt?.length)
 
       // 4. 衍生 keypair
+      console.log('[useZkLoginKeypair] Step 5: Deriving keypair from claims...')
       const claims: ZkLoginClaims = {
         sub: sessionData.sub,
         iss: sessionData.iss,
@@ -121,6 +140,8 @@ export function useZkLoginKeypair(options?: UseZkLoginKeypairOptions) {
       }
       const keypair = await deriveEncryptionKeypairFromZkLogin(claims)
       const publicKeyBase64 = toBase64(keypair.publicKey)
+      console.log('[useZkLoginKeypair] Step 5: Keypair derived successfully')
+      console.log('[useZkLoginKeypair] Public key (base64):', publicKeyBase64)
 
       setState({
         keypair,
@@ -129,10 +150,13 @@ export function useZkLoginKeypair(options?: UseZkLoginKeypairOptions) {
         error: null,
       })
 
+      console.log('[useZkLoginKeypair] === Derivation successful! ===')
       onSuccess?.(keypair)
       return { keypair, publicKeyBase64 }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err))
+      console.error('[useZkLoginKeypair] === Error ===', error.message)
+      console.error('[useZkLoginKeypair] Stack:', error.stack)
       setState(prev => ({ ...prev, isLoading: false, error }))
       onError?.(error)
       return null

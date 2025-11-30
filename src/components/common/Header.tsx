@@ -1,9 +1,9 @@
 'use client'
 
-import { ConnectButton, useDisconnectWallet, useCurrentAccount } from '@mysten/dapp-kit'
+import { useDisconnectWallet, useCurrentAccount, useWallets, useConnectWallet } from '@mysten/dapp-kit'
 import Link from 'next/link'
-import { useAuthMethod } from '@/hooks/useAuthMethod'
 import { useUser } from '@/hooks/useUser'
+import { useCallback } from 'react'
 
 interface HeaderProps {
   title?: string
@@ -11,13 +11,25 @@ interface HeaderProps {
 
 /**
  * Header component with authentication status and navigation
- * Shows different UI for zkLogin vs wallet users
+ * Only supports zkLogin (Google OAuth)
  */
 export function Header({ title = 'Sui Chat' }: HeaderProps) {
   const account = useCurrentAccount()
-  const { authMethod, isZkLogin } = useAuthMethod()
   const { mutate: disconnect } = useDisconnectWallet()
   const { profile } = useUser()
+  const wallets = useWallets()
+  const { mutate: connectWallet, isPending } = useConnectWallet()
+
+  // 只顯示 zkLogin 錢包
+  const zkLoginWallet = wallets.find(
+    w => w.name.toLowerCase().includes('google') || w.name.toLowerCase().includes('enoki')
+  )
+
+  const handleConnect = useCallback(() => {
+    if (zkLoginWallet) {
+      connectWallet({ wallet: zkLoginWallet })
+    }
+  }, [connectWallet, zkLoginWallet])
 
   const truncateAddress = (address: string) => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`
@@ -55,19 +67,8 @@ export function Header({ title = 'Sui Chat' }: HeaderProps) {
 
             {account ? (
               <div className="flex items-center gap-3">
-                {/* Login method badge */}
-                <span
-                  className={`px-2 py-1 text-xs font-medium rounded-full ${
-                    isZkLogin
-                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
-                      : 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-                  }`}
-                >
-                  {isZkLogin ? 'zkLogin' : 'Wallet'}
-                </span>
-
                 {/* Profile name or address */}
-                <span className="text-sm text-zinc-600 dark:text-zinc-400 font-mono">
+                <span className="text-sm text-zinc-600 dark:text-zinc-400">
                   {profile?.displayName || truncateAddress(account.address)}
                 </span>
 
@@ -76,11 +77,17 @@ export function Header({ title = 'Sui Chat' }: HeaderProps) {
                   onClick={() => disconnect()}
                   className="px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                 >
-                  Disconnect
+                  Sign Out
                 </button>
               </div>
             ) : (
-              <ConnectButton />
+              <button
+                onClick={handleConnect}
+                disabled={isPending || !zkLoginWallet}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isPending ? 'Connecting...' : 'Sign in with Google'}
+              </button>
             )}
           </nav>
         </div>

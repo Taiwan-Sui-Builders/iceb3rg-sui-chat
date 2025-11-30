@@ -2,35 +2,31 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit'
+import { useCurrentAccount } from '@mysten/dapp-kit'
 import { Transaction } from '@mysten/sui/transactions'
-import { useSignPersonalMessage } from '@mysten/dapp-kit'
 import toast from 'react-hot-toast'
 import { Header } from '@/components/common/Header'
 import { createProfileTransaction } from '@/lib/sui/profile'
-import { useEncryptionKeypair } from '@/hooks/useEncryption'
 import { useUser } from '@/hooks/useUser'
-import { fromBase64 } from '@/lib/crypto'
+import { useZkLoginKeypair, useSponsoredTransaction } from '@/hooks'
 import { createTransactionLogger } from '@/lib/sui/transaction-logger'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Loader2, UserPlus, ArrowLeft } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Loader2, UserPlus, ArrowLeft, AlertCircle } from 'lucide-react'
 
 export default function RegisterPage() {
   const router = useRouter()
   const account = useCurrentAccount()
-  const { profile, isLoading: isLoadingProfile, isRegistered } = useUser()
-  const { mutate: signAndExecuteTransaction, isPending } = useSignAndExecuteTransaction()
-  const { mutate: signPersonalMessage } = useSignPersonalMessage()
-  const { loadKeypair, getPublicKeyBase64 } = useEncryptionKeypair()
+  const { isLoading: isLoadingProfile, isRegistered } = useUser()
+  const { derive: deriveKeypair, keypair, isLoading: isDerivingKey } = useZkLoginKeypair()
+  const { execute: executeSponsoredTx, isPending: isExecuting } = useSponsoredTransaction()
 
   const [customId, setCustomId] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [avatarBlobId, setAvatarBlobId] = useState('')
-  const [isGeneratingKey, setIsGeneratingKey] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Redirect if user already has a profile
   useEffect(() => {
@@ -40,99 +36,101 @@ export default function RegisterPage() {
   }, [account, isLoadingProfile, isRegistered, router])
 
   const handleRegister = async () => {
+    console.log('[RegisterPage] === Starting registration ===')
+    console.log('[RegisterPage] Account:', account?.address)
+
     if (!account) {
-      toast.error('Please connect your wallet first')
+      console.error('[RegisterPage] Error: No account')
+      toast.error('Please sign in first')
       return
     }
 
     if (!customId.trim()) {
+      console.error('[RegisterPage] Error: Custom ID is required')
       toast.error('Custom ID is required')
       return
     }
 
     if (!displayName.trim()) {
+      console.error('[RegisterPage] Error: Display name is required')
       toast.error('Display name is required')
       return
     }
 
-    setIsGeneratingKey(true)
+    console.log('[RegisterPage] Form data:', {
+      customId: customId.trim(),
+      displayName: displayName.trim(),
+      hasAvatarBlobId: !!avatarBlobId.trim(),
+    })
+
+    setIsSubmitting(true)
 
     try {
-      // Step 1: Sign a message to derive encryption key
-      signPersonalMessage(
-        {
-          message: new TextEncoder().encode('sui-chat:derive-encryption-key:v1'),
-        },
-        {
-          onSuccess: async (result) => {
-            try {
-              // Step 2: Derive encryption keypair from signature
-              // result.bytes is a base64 string, convert to Uint8Array
-              const signature = typeof result.bytes === 'string'
-                ? fromBase64(result.bytes)
-                : new Uint8Array(result.bytes)
-              const keypair = await loadKeypair(signature)
+      // Step 1: Derive encryption keypair from zkLogin
+      console.log('[RegisterPage] Step 1: Deriving encryption keypair...')
+      const result = await deriveKeypair()
+      if (!result || !result.keypair) {
+        console.error('[RegisterPage] Step 1: Failed to derive keypair')
+        toast.error('Failed to generate encryption key')
+        setIsSubmitting(false)
+        return
+      }
+      console.log('[RegisterPage] Step 1: Keypair derived successfully')
+      console.log('[RegisterPage] Public key base64:', result.publicKeyBase64)
 
-              if (!keypair || !keypair.publicKey) {
-                toast.error('Failed to generate encryption key')
-                setIsGeneratingKey(false)
-                return
-              }
+      // Step 2: Create profile transaction
+      console.log('[RegisterPage] Step 2: Creating profile transaction...')
+      const tx = new Transaction()
+      const publicKeyBytes = result.keypair.publicKey
 
-              // Step 3: Create profile transaction
-              const tx = new Transaction()
-              // Use the public key directly from the keypair
-              const publicKeyBytes = keypair.publicKey
+      const txParams = {
+        customId: customId.trim(),
+        displayName: displayName.trim(),
+        avatarBlobId: avatarBlobId.trim() || '',
+        publicKey: publicKeyBytes,
+      }
+      console.log('[RegisterPage] Step 2: Transaction params:', {
+        ...txParams,
+        publicKey: `[${publicKeyBytes.length} bytes]`,
+      })
 
-              const txParams = {
-                customId: customId.trim(),
-                displayName: displayName.trim(),
-                avatarBlobId: avatarBlobId.trim() || '',
-                publicKey: publicKeyBytes,
-              }
+      createProfileTransaction(tx, txParams)
+      console.log('[RegisterPage] Step 2: Profile transaction created')
 
-              createProfileTransaction(tx, txParams)
+      // Log transaction start
+      const logger = createTransactionLogger('createProfile')
+      logger.logStart(txParams, tx)
 
-              // Log transaction start
-              const logger = createTransactionLogger('createProfile')
-              logger.logStart(txParams, tx)
+      // Step 3: Execute via sponsored transaction
+      console.log('[RegisterPage] Step 3: Executing sponsored transaction...')
+      const txResult = await executeSponsoredTx(tx)
+      console.log('[RegisterPage] Step 3: Transaction result:', {
+        success: txResult.success,
+        digest: txResult.digest,
+        error: txResult.error,
+      })
 
-              // Step 4: Execute transaction
-              signAndExecuteTransaction(
-                {
-                  transaction: tx,
-                },
-                {
-                  onSuccess: (result) => {
-                    logger.logSuccess(result)
-                    toast.success('Registration successful!')
-                    router.push('/rooms')
-                  },
-                  onError: (error) => {
-                    logger.logError(error, txParams)
-                    toast.error(`Registration failed: ${error.message}`)
-                    setIsGeneratingKey(false)
-                  },
-                }
-              )
-            } catch (error: any) {
-              toast.error(`Failed to generate key: ${error.message}`)
-              setIsGeneratingKey(false)
-            }
-          },
-          onError: (error) => {
-            toast.error(`Failed to sign message: ${error.message}`)
-            setIsGeneratingKey(false)
-          },
-        }
-      )
+      if (txResult.success) {
+        logger.logSuccess(txResult)
+        console.log('[RegisterPage] === Registration successful! ===')
+        toast.success('Registration successful!')
+        router.push('/rooms')
+      } else {
+        logger.logError(new Error(txResult.error || 'Unknown error'), txParams)
+        console.error('[RegisterPage] === Registration failed ===', txResult.error)
+        toast.error(`Registration failed: ${txResult.error}`)
+      }
     } catch (error: any) {
+      console.error('[RegisterPage] === Error ===', error.message)
+      console.error('[RegisterPage] Stack:', error.stack)
       toast.error(`Registration error: ${error.message}`)
-      setIsGeneratingKey(false)
+    } finally {
+      setIsSubmitting(false)
+      console.log('[RegisterPage] === End ===')
     }
   }
 
-  const isLoading = isPending || isGeneratingKey
+  const isLoading = isExecuting || isDerivingKey || isSubmitting
   const isFormValid = customId.trim() && displayName.trim()
 
   // Show loading or redirect if already registered
@@ -145,7 +143,7 @@ export default function RegisterPage() {
             <CardHeader>
               <CardTitle>Registration Required</CardTitle>
               <CardDescription>
-                Please connect your wallet to register for Sui Chat.
+                Please sign in with Google to register for Sui Chat.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -187,6 +185,22 @@ export default function RegisterPage() {
           </Button>
         </div>
 
+        {/* Registration Required Notice */}
+        <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-500 mt-0.5 flex-shrink-0" />
+            <div>
+              <h3 className="font-medium text-amber-800 dark:text-amber-200">
+                Registration Required
+              </h3>
+              <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                You need to create a profile before you can use Sui Chat.
+                This is a one-time setup that stores your profile on the blockchain.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -194,7 +208,7 @@ export default function RegisterPage() {
               <CardTitle>Create Your Profile</CardTitle>
             </div>
             <CardDescription>
-              Register to start chatting on Sui. Your profile will be stored on-chain.
+              Fill in your details below to complete registration. Your profile will be stored on-chain.
             </CardDescription>
           </CardHeader>
           <CardContent>

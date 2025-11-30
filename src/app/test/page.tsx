@@ -54,7 +54,7 @@ export default function TestPage() {
   const { currentWallet } = useCurrentWallet();
   const { mutate: connectWallet, isPending: isConnecting } = useConnectWallet();
   const { mutate: disconnect } = useDisconnectWallet();
-  const { authMethod, isZkLogin } = useAuthMethod();
+  const { isConnected, isZkLogin } = useAuthMethod();
   const { execute: executeSponsoredTx, isPending: isSponsoredPending } =
     useSponsoredTransaction();
 
@@ -498,7 +498,7 @@ export default function TestPage() {
               <div className="flex justify-between">
                 <span className="text-zinc-400">Auth Method:</span>
                 <span className={isZkLogin ? "text-blue-400" : "text-zinc-300"}>
-                  {authMethod || "N/A"}
+                  {isConnected ? "zkLogin" : "N/A"}
                 </span>
               </div>
               <div className="flex justify-between">

@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit'
+import { useCurrentAccount, useSuiClient } from '@mysten/dapp-kit'
 import { Transaction } from '@mysten/sui/transactions'
 import toast from 'react-hot-toast'
 import { Header } from '@/components/common/Header'
 import { createChatTransaction } from '@/lib/sui/chat'
 import { useUser } from '@/hooks/useUser'
 import { useRoomKey } from '@/hooks/useEncryption'
+import { useSponsoredTransaction } from '@/hooks'
 import { createTransactionLogger } from '@/lib/sui/transaction-logger'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,7 +21,7 @@ export default function CreateRoomPage() {
     const router = useRouter()
     const account = useCurrentAccount()
     const { profile, isLoading: isLoadingProfile, isRegistered } = useUser()
-    const { mutate: signAndExecuteTransaction, isPending } = useSignAndExecuteTransaction()
+    const { execute: executeSponsoredTx, isPending } = useSponsoredTransaction()
     const { createRoomKey } = useRoomKey()
     const client = useSuiClient()
 
@@ -36,17 +37,26 @@ export default function CreateRoomPage() {
     }, [account, isLoadingProfile, isRegistered, router])
 
     const handleCreateRoom = async () => {
+        console.log('[CreateRoomPage] === Starting room creation ===')
+        console.log('[CreateRoomPage] Account:', account?.address)
+        console.log('[CreateRoomPage] Profile chatIndexId:', profile?.chatIndexId)
+        console.log('[CreateRoomPage] Room name:', roomName.trim())
+        console.log('[CreateRoomPage] Is encrypted:', isEncrypted)
+
         if (!account) {
-            toast.error('Please connect your wallet first')
+            console.error('[CreateRoomPage] Error: No account')
+            toast.error('Please sign in first')
             return
         }
 
         if (!profile?.chatIndexId) {
+            console.error('[CreateRoomPage] Error: Profile not found')
             toast.error('Profile not found. Please register first.')
             return
         }
 
         if (!roomName.trim()) {
+            console.error('[CreateRoomPage] Error: Room name is required')
             toast.error('Room name is required')
             return
         }
@@ -54,6 +64,7 @@ export default function CreateRoomPage() {
         setIsCreating(true)
 
         try {
+            console.log('[CreateRoomPage] Step 1: Creating transaction...')
             const tx = new Transaction()
 
             // For encrypted rooms, generate a room key
@@ -62,7 +73,9 @@ export default function CreateRoomPage() {
 
             if (isEncrypted) {
                 // Generate a random symmetric key for the room
+                console.log('[CreateRoomPage] Step 1: Generating room encryption key...')
                 encryptedKey = createRoomKey()
+                console.log('[CreateRoomPage] Step 1: Room key generated')
                 // Note: In a real implementation, you would encrypt this key
                 // with each member's public key when inviting them
             }
@@ -73,91 +86,112 @@ export default function CreateRoomPage() {
                 isEncrypted,
                 encryptedKey,
             }
+            console.log('[CreateRoomPage] Step 1: Transaction params:', {
+                ...txParams,
+                encryptedKey: encryptedKey instanceof Uint8Array ? `[${encryptedKey.length} bytes]` : encryptedKey,
+            })
 
             createChatTransaction(tx, txParams)
+            console.log('[CreateRoomPage] Step 1: Transaction created')
 
             // Log transaction start
             const logger = createTransactionLogger('createChat')
             logger.logStart(txParams, tx)
 
-            // Execute transaction
-            signAndExecuteTransaction(
-                {
-                    transaction: tx,
-                },
-                {
-                    onSuccess: async (result) => {
-                        logger.logSuccess(result)
-                        toast.success('Chat room created successfully!')
+            // Execute via sponsored transaction
+            console.log('[CreateRoomPage] Step 2: Executing sponsored transaction...')
+            const result = await executeSponsoredTx(tx)
+            console.log('[CreateRoomPage] Step 2: Transaction result:', {
+                success: result.success,
+                digest: result.digest,
+                error: result.error,
+            })
 
-                        // Extract chat room ID from transaction effects
-                        // ChatRoom is a shared object, so check sharedObjects first
-                        let chatRoomId: string | undefined
+            if (result.success && result.digest) {
+                logger.logSuccess(result)
+                console.log('[CreateRoomPage] === Room created successfully! ===')
+                toast.success('Chat room created successfully!')
 
-                        try {
-                            // Fetch the full transaction response to get structured effects
-                            const txResponse = await client.getTransactionBlock({
-                                digest: result.digest,
-                                options: {
-                                    showEffects: true,
-                                    showObjectChanges: true,
-                                },
-                            })
+                // Extract chat room ID from transaction effects
+                let chatRoomId: string | undefined
 
-                            // Check shared objects (ChatRoom is shared)
-                            if (txResponse.effects && typeof txResponse.effects !== 'string') {
-                                if (txResponse.effects.sharedObjects && txResponse.effects.sharedObjects.length > 0) {
-                                // Find the ChatRoom object (should be the one we just created)
-                                    const chatRoom = txResponse.effects.sharedObjects.find(
-                                    (obj: any) => obj.objectType?.includes('ChatRoom') || obj.objectType?.includes('chat::ChatRoom')
-                                )
-                                if (chatRoom) {
-                                    chatRoomId = chatRoom.objectId
-                                } else {
-                                    // If no type match, use the first shared object
-                                        chatRoomId = txResponse.effects.sharedObjects[0]?.objectId
-                                }
-                            }
+                try {
+                    // Fetch the full transaction response to get structured effects
+                    console.log('[CreateRoomPage] Step 3: Fetching transaction details...')
+                    const txResponse = await client.getTransactionBlock({
+                        digest: result.digest,
+                        options: {
+                            showEffects: true,
+                            showObjectChanges: true,
+                        },
+                    })
+                    console.log('[CreateRoomPage] Step 3: Transaction response:', {
+                        hasEffects: !!txResponse.effects,
+                        sharedObjectsCount: (txResponse.effects as any)?.sharedObjects?.length || 0,
+                        createdCount: (txResponse.effects as any)?.created?.length || 0,
+                        objectChangesCount: txResponse.objectChanges?.length || 0,
+                    })
 
-                            // Fallback: Check created objects
-                                if (!chatRoomId && txResponse.effects.created && txResponse.effects.created.length > 0) {
-                                    chatRoomId = txResponse.effects.created[0]?.reference?.objectId
+                    // Check shared objects (ChatRoom is shared)
+                    if (txResponse.effects && typeof txResponse.effects !== 'string') {
+                        if (txResponse.effects.sharedObjects && txResponse.effects.sharedObjects.length > 0) {
+                            console.log('[CreateRoomPage] Step 3: Checking shared objects...')
+                            // Find the ChatRoom object (should be the one we just created)
+                            const chatRoom = txResponse.effects.sharedObjects.find(
+                                (obj: any) => obj.objectType?.includes('ChatRoom') || obj.objectType?.includes('chat::ChatRoom')
+                            )
+                            if (chatRoom) {
+                                chatRoomId = chatRoom.objectId
+                                console.log('[CreateRoomPage] Step 3: Found ChatRoom by type:', chatRoomId)
+                            } else {
+                                // If no type match, use the first shared object
+                                chatRoomId = txResponse.effects.sharedObjects[0]?.objectId
+                                console.log('[CreateRoomPage] Step 3: Using first shared object:', chatRoomId)
                             }
                         }
 
-                        // Check object changes as fallback
-                            if (!chatRoomId && txResponse.objectChanges) {
-                                const createdChange = txResponse.objectChanges.find(
-                                    (change: any) => change.type === 'created'
-                                )
-                                if (createdChange && createdChange.type === 'created') {
-                                    chatRoomId = createdChange.objectId
-                                }
-                            }
-                        } catch (error) {
-                            console.error('Failed to fetch transaction details:', error)
-                            // If we can't fetch transaction details, we'll redirect to rooms list
-                            // The room will appear in the list after refetch
+                        // Fallback: Check created objects
+                        if (!chatRoomId && txResponse.effects.created && txResponse.effects.created.length > 0) {
+                            chatRoomId = txResponse.effects.created[0]?.reference?.objectId
+                            console.log('[CreateRoomPage] Step 3: Found in created objects:', chatRoomId)
                         }
+                    }
 
-                        if (chatRoomId) {
-                            router.push(`/rooms/${chatRoomId}`)
-                        } else {
-                            // Fallback: redirect to rooms list
-                            // The room will appear in the list after refetch
-                            router.push('/rooms')
+                    // Check object changes as fallback
+                    if (!chatRoomId && txResponse.objectChanges) {
+                        console.log('[CreateRoomPage] Step 3: Checking object changes...')
+                        const createdChange = txResponse.objectChanges.find(
+                            (change: any) => change.type === 'created'
+                        )
+                        if (createdChange && createdChange.type === 'created') {
+                            chatRoomId = createdChange.objectId
+                            console.log('[CreateRoomPage] Step 3: Found in object changes:', chatRoomId)
                         }
-                    },
-                    onError: (error) => {
-                        logger.logError(error, txParams)
-                        toast.error(`Failed to create room: ${error.message}`)
-                        setIsCreating(false)
-                    },
+                    }
+                } catch (error) {
+                    console.error('[CreateRoomPage] Step 3: Failed to fetch transaction details:', error)
                 }
-            )
+
+                console.log('[CreateRoomPage] Final chatRoomId:', chatRoomId)
+                if (chatRoomId) {
+                    console.log('[CreateRoomPage] Navigating to room:', chatRoomId)
+                    router.push(`/rooms/${chatRoomId}`)
+                } else {
+                    console.log('[CreateRoomPage] No room ID found, navigating to rooms list')
+                    router.push('/rooms')
+                }
+            } else {
+                logger.logError(new Error(result.error || 'Unknown error'), txParams)
+                console.error('[CreateRoomPage] === Room creation failed ===', result.error)
+                toast.error(`Failed to create room: ${result.error}`)
+            }
         } catch (error: any) {
+            console.error('[CreateRoomPage] === Error ===', error.message)
+            console.error('[CreateRoomPage] Stack:', error.stack)
             toast.error(`Error creating room: ${error.message}`)
+        } finally {
             setIsCreating(false)
+            console.log('[CreateRoomPage] === End ===')
         }
     }
 
@@ -171,9 +205,9 @@ export default function CreateRoomPage() {
                 <main className="max-w-2xl mx-auto px-4 py-16">
                     <Card>
                         <CardHeader>
-                            <CardTitle>Wallet Required</CardTitle>
+                            <CardTitle>Sign In Required</CardTitle>
                             <CardDescription>
-                                Please connect your wallet to create a chat room.
+                                Please sign in to create a chat room.
                             </CardDescription>
                         </CardHeader>
                     </Card>
@@ -334,4 +368,3 @@ export default function CreateRoomPage() {
         </div>
     )
 }
-

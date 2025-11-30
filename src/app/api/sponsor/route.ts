@@ -23,17 +23,28 @@ const ALLOWED_TARGETS: string[] = [
  * 5. 前端簽名後呼叫 /api/sponsor/execute
  */
 export async function POST(request: NextRequest) {
+  console.log('[API /sponsor] === Sponsor request received ===')
+
   try {
     if (!ENOKI_PRIVATE_KEY) {
+      console.error('[API /sponsor] Error: ENOKI_PRIVATE_KEY not configured')
       return NextResponse.json(
         { error: 'ENOKI_PRIVATE_KEY not configured' },
         { status: 500 }
       )
     }
+    console.log('[API /sponsor] ENOKI_PRIVATE_KEY is configured')
 
-    const { txBytes, sender } = await request.json()
+    const body = await request.json()
+    const { txBytes, sender } = body
+    console.log('[API /sponsor] Request body:', {
+      hasTxBytes: !!txBytes,
+      txBytesLength: txBytes?.length,
+      sender,
+    })
 
     if (!txBytes) {
+      console.error('[API /sponsor] Error: Missing txBytes')
       return NextResponse.json(
         { error: 'Missing txBytes' },
         { status: 400 }
@@ -41,6 +52,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!sender) {
+      console.error('[API /sponsor] Error: Missing sender address')
       return NextResponse.json(
         { error: 'Missing sender address' },
         { status: 400 }
@@ -48,7 +60,12 @@ export async function POST(request: NextRequest) {
     }
 
     // 呼叫 Enoki API 進行 sponsorship
-    const sponsorRes = await fetch(`${ENOKI_API_URL}/transaction-blocks/sponsor`, {
+    const enokiUrl = `${ENOKI_API_URL}/transaction-blocks/sponsor`
+    console.log('[API /sponsor] Calling Enoki API:', enokiUrl)
+    console.log('[API /sponsor] Network:', NETWORK)
+    console.log('[API /sponsor] Allowed targets:', ALLOWED_TARGETS.length > 0 ? ALLOWED_TARGETS : 'none (all allowed)')
+
+    const sponsorRes = await fetch(enokiUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${ENOKI_PRIVATE_KEY}`,
@@ -63,9 +80,11 @@ export async function POST(request: NextRequest) {
       }),
     })
 
+    console.log('[API /sponsor] Enoki response status:', sponsorRes.status)
+
     if (!sponsorRes.ok) {
       const errorText = await sponsorRes.text()
-      console.error('Enoki sponsor error:', errorText)
+      console.error('[API /sponsor] Enoki sponsor error:', errorText)
       return NextResponse.json(
         { error: 'Failed to sponsor transaction', details: errorText },
         { status: sponsorRes.status }
@@ -73,14 +92,18 @@ export async function POST(request: NextRequest) {
     }
 
     const sponsorRes_json = await sponsorRes.json()
-
-    // Debug: log Enoki response
-    console.log('Enoki sponsor response:', JSON.stringify(sponsorRes_json, null, 2))
+    console.log('[API /sponsor] Enoki sponsor response:', JSON.stringify(sponsorRes_json, null, 2))
 
     // Enoki 回應格式: { data: { digest, bytes } }
     const sponsorData = sponsorRes_json.data || sponsorRes_json
+    console.log('[API /sponsor] Parsed sponsor data:', {
+      hasBytes: !!sponsorData.bytes,
+      bytesLength: sponsorData.bytes?.length,
+      digest: sponsorData.digest,
+    })
 
     if (!sponsorData.bytes) {
+      console.error('[API /sponsor] Error: Invalid sponsor response - missing bytes')
       return NextResponse.json(
         { error: 'Invalid sponsor response', details: JSON.stringify(sponsorRes_json) },
         { status: 500 }
@@ -90,12 +113,13 @@ export async function POST(request: NextRequest) {
     // 返回 sponsored tx bytes 和 sponsor signature
     // 注意：Enoki sponsor API 不返回 signature，signature 會在 execute 時由 Enoki 提供
     // 或者我們需要用不同的 API flow
+    console.log('[API /sponsor] === Sponsor success ===')
     return NextResponse.json({
       txBytes: sponsorData.bytes,
       digest: sponsorData.digest,
     })
   } catch (error) {
-    console.error('Sponsor API error:', error)
+    console.error('[API /sponsor] === Error ===', error)
     return NextResponse.json(
       { error: 'Internal server error', details: String(error) },
       { status: 500 }

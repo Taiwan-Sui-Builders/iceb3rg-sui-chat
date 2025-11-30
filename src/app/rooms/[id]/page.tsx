@@ -2,15 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit'
+import { useCurrentAccount } from '@mysten/dapp-kit'
 import { Transaction } from '@mysten/sui/transactions'
-import Link from 'next/link'
 import { Header } from '@/components/common/Header'
 import { ErrorMessage } from '@/components/common/ErrorMessage'
-import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { useChatRoom } from '@/hooks/useChatRooms'
 import { useMessages } from '@/hooks/useMessages'
 import { useUser } from '@/hooks/useUser'
+import { useSponsoredTransaction } from '@/hooks'
 import { parseChatObject } from '@/lib/sui/chat'
 import { sendTextMessageTransaction } from '@/lib/sui/message'
 import { createTransactionLogger } from '@/lib/sui/transaction-logger'
@@ -32,7 +31,7 @@ export default function ChatRoomPage() {
 
   const { data: chatRoomData, isLoading: isLoadingRoom, error: roomError } = useChatRoom(chatId)
   const { messages, messageCount, isLoading: isLoadingMessages, error: messagesError, refetch: refetchMessages } = useMessages(chatId)
-  const { mutate: signAndExecuteTransaction, isPending } = useSignAndExecuteTransaction()
+  const { execute: executeSponsoredTx, isPending } = useSponsoredTransaction()
 
   // Log messages hook usage
   useEffect(() => {
@@ -63,45 +62,58 @@ export default function ChatRoomPage() {
   }, [messages])
 
   const handleSendMessage = async () => {
+    console.log('[ChatRoomPage] === Starting send message ===')
+    console.log('[ChatRoomPage] Account:', account?.address)
+    console.log('[ChatRoomPage] Chat ID:', chatId)
+    console.log('[ChatRoomPage] Message:', messageText.trim())
+
     if (!account || !chatId || !messageText.trim()) {
+      console.error('[ChatRoomPage] Error: Missing account, chatId, or message')
       return
     }
 
     setIsSending(true)
 
     try {
+      console.log('[ChatRoomPage] Step 1: Creating send message transaction...')
       const tx = new Transaction()
       sendTextMessageTransaction(tx, chatId, messageText.trim())
+      console.log('[ChatRoomPage] Step 1: Transaction created')
 
       const logger = createTransactionLogger('sendMessage')
       logger.logStart({ chatId, message: messageText.trim() }, tx)
 
-      signAndExecuteTransaction(
-        {
-          transaction: tx,
-        },
-        {
-          onSuccess: async (result) => {
-            logger.logSuccess(result)
-            toast.success('Message sent!')
-            setMessageText('')
-            // Refetch messages after a short delay to allow transaction to be indexed
-            setTimeout(() => {
-              refetchMessages()
-            }, 2000)
-          },
-          onError: (error) => {
-            logger.logError(error, { chatId, message: messageText.trim() })
-            toast.error(`Failed to send message: ${error.message}`)
-          },
-          onSettled: () => {
-            setIsSending(false)
-          },
-        }
-      )
+      console.log('[ChatRoomPage] Step 2: Executing sponsored transaction...')
+      const result = await executeSponsoredTx(tx)
+      console.log('[ChatRoomPage] Step 2: Transaction result:', {
+        success: result.success,
+        digest: result.digest,
+        error: result.error,
+      })
+
+      if (result.success) {
+        logger.logSuccess(result)
+        console.log('[ChatRoomPage] === Message sent successfully! ===')
+        toast.success('Message sent!')
+        setMessageText('')
+        // Refetch messages after a short delay to allow transaction to be indexed
+        console.log('[ChatRoomPage] Scheduling message refetch in 2 seconds...')
+        setTimeout(() => {
+          console.log('[ChatRoomPage] Refetching messages...')
+          refetchMessages()
+        }, 2000)
+      } else {
+        logger.logError(new Error(result.error || 'Unknown error'), { chatId, message: messageText.trim() })
+        console.error('[ChatRoomPage] === Message send failed ===', result.error)
+        toast.error(`Failed to send message: ${result.error}`)
+      }
     } catch (error: any) {
+      console.error('[ChatRoomPage] === Error ===', error.message)
+      console.error('[ChatRoomPage] Stack:', error.stack)
       toast.error(`Error sending message: ${error.message}`)
+    } finally {
       setIsSending(false)
+      console.log('[ChatRoomPage] === End ===')
     }
   }
 
@@ -124,7 +136,7 @@ export default function ChatRoomPage() {
           <Card>
             <CardContent className="pt-6">
               <p className="text-center text-muted-foreground">
-                Please connect your wallet to view this chat room.
+                Please sign in to view this chat room.
               </p>
             </CardContent>
           </Card>
@@ -285,4 +297,3 @@ export default function ChatRoomPage() {
     </div>
   )
 }
-
