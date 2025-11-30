@@ -4,9 +4,7 @@ import { createNetworkConfig, SuiClientProvider, WalletProvider } from '@mysten/
 import { getFullnodeUrl } from '@mysten/sui/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { EnokiInitializer } from '@/lib/enoki/EnokiInitializer'
-
-// 從環境變數取得預設網路
-const defaultNetwork = (process.env.NEXT_PUBLIC_SUI_NETWORK || 'testnet') as 'testnet' | 'devnet' | 'mainnet' | 'localnet'
+import { SUI_NETWORK } from '@/lib/constants'
 
 // Config options for the networks you want to connect to
 const { networkConfig } = createNetworkConfig({
@@ -26,6 +24,9 @@ const queryClient = new QueryClient({
 })
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  // Use network from environment variable, default to devnet
+  const defaultNetwork = SUI_NETWORK || 'devnet'
+
   return (
     <QueryClientProvider client={queryClient}>
       <SuiClientProvider networks={networkConfig} defaultNetwork={defaultNetwork}>
@@ -38,4 +39,3 @@ export function Providers({ children }: { children: React.ReactNode }) {
     </QueryClientProvider>
   )
 }
-
