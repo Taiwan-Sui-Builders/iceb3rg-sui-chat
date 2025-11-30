@@ -107,25 +107,25 @@ export default function CreateRoomPage() {
                             // Check shared objects (ChatRoom is shared)
                             if (txResponse.effects && typeof txResponse.effects !== 'string') {
                                 if (txResponse.effects.sharedObjects && txResponse.effects.sharedObjects.length > 0) {
-                                    // Find the ChatRoom object (should be the one we just created)
+                                // Find the ChatRoom object (should be the one we just created)
                                     const chatRoom = txResponse.effects.sharedObjects.find(
-                                        (obj: any) => obj.objectType?.includes('ChatRoom') || obj.objectType?.includes('chat::ChatRoom')
-                                    )
-                                    if (chatRoom) {
-                                        chatRoomId = chatRoom.objectId
-                                    } else {
-                                        // If no type match, use the first shared object
+                                    (obj: any) => obj.objectType?.includes('ChatRoom') || obj.objectType?.includes('chat::ChatRoom')
+                                )
+                                if (chatRoom) {
+                                    chatRoomId = chatRoom.objectId
+                                } else {
+                                    // If no type match, use the first shared object
                                         chatRoomId = txResponse.effects.sharedObjects[0]?.objectId
-                                    }
-                                }
-
-                                // Fallback: Check created objects
-                                if (!chatRoomId && txResponse.effects.created && txResponse.effects.created.length > 0) {
-                                    chatRoomId = txResponse.effects.created[0]?.reference?.objectId
                                 }
                             }
 
-                            // Check object changes as fallback
+                            // Fallback: Check created objects
+                                if (!chatRoomId && txResponse.effects.created && txResponse.effects.created.length > 0) {
+                                    chatRoomId = txResponse.effects.created[0]?.reference?.objectId
+                            }
+                        }
+
+                        // Check object changes as fallback
                             if (!chatRoomId && txResponse.objectChanges) {
                                 const createdChange = txResponse.objectChanges.find(
                                     (change: any) => change.type === 'created'

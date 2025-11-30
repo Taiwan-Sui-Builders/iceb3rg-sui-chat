@@ -26,11 +26,25 @@ export default function ChatRoomPage() {
   const params = useParams()
   const account = useCurrentAccount()
   const { isRegistered } = useUser()
-  const chatId = params?.id as string | null
+
+  // Ensure chatId is always defined (even if null) before hooks use it
+  const chatId = (params?.id as string | undefined) || null
 
   const { data: chatRoomData, isLoading: isLoadingRoom, error: roomError } = useChatRoom(chatId)
   const { messages, messageCount, isLoading: isLoadingMessages, error: messagesError, refetch: refetchMessages } = useMessages(chatId)
   const { mutate: signAndExecuteTransaction, isPending } = useSignAndExecuteTransaction()
+
+  // Log messages hook usage
+  useEffect(() => {
+    console.log('[ChatRoomPage] useMessages hook status:', {
+      chatId,
+      messagesCount: messages.length,
+      messageCount,
+      isLoading: isLoadingMessages,
+      error: messagesError?.message,
+      hasMore: messageCount > messages.length
+    })
+  }, [chatId, messages, messageCount, isLoadingMessages, messagesError])
 
   const [messageText, setMessageText] = useState('')
   const [isSending, setIsSending] = useState(false)
@@ -47,9 +61,6 @@ export default function ChatRoomPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
-
-  // Parse chat room data
-  const chatRoom = chatRoomData ? parseChatObject(chatRoomData) : null
 
   const handleSendMessage = async () => {
     if (!account || !chatId || !messageText.trim()) {
@@ -97,7 +108,10 @@ export default function ChatRoomPage() {
   const isLoading = isLoadingRoom || isLoadingMessages
   const error = roomError || messagesError
 
-  // Don't render content if redirecting
+  // Parse chat room data (after all hooks)
+  const chatRoom = chatRoomData ? parseChatObject(chatRoomData) : null
+
+  // Don't render content if redirecting (after all hooks)
   if (account && !isRegistered) {
     return null
   }
@@ -217,11 +231,10 @@ export default function ChatRoomPage() {
                   className={`flex ${message.sender === account.address ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[70%] rounded-lg p-3 ${
-                      message.sender === account.address
+                    className={`max-w-[70%] rounded-lg p-3 ${message.sender === account.address
                         ? 'bg-primary text-primary-foreground'
                         : 'bg-muted'
-                    }`}
+                      }`}
                   >
                     <div className="text-xs opacity-70 mb-1">
                       {message.sender === account.address ? 'You' : `${message.sender.slice(0, 8)}...`}

@@ -32,6 +32,13 @@ export function useMessages(chatId: string | null) {
             ? Number((chatData.data.content.fields as any)?.message_count || 0)
             : 0;
 
+    console.log('[useMessages] Chat room loaded:', {
+        chatId,
+        hasChatData: !!chatData,
+        messageCount,
+        chatDataStructure: chatData?.data?.content?.dataType
+    });
+
     // Fetch messages using dynamic fields
     // Messages are stored with u64 sequence numbers as keys
     const { data: dynamicFields, isLoading, error, refetch } = useSuiClientQuery(
@@ -43,6 +50,14 @@ export function useMessages(chatId: string | null) {
             enabled: !!chatId,
         }
     );
+
+    console.log('[useMessages] Dynamic fields loaded:', {
+        chatId,
+        hasDynamicFields: !!dynamicFields,
+        dynamicFieldsCount: dynamicFields?.data?.length || 0,
+        isLoading,
+        error: error?.message
+    });
 
     // Extract message indices from dynamic fields
     // Dynamic fields with u64 keys are the messages
@@ -78,9 +93,25 @@ export function useMessages(chatId: string | null) {
         });
     }
 
+    console.log('[useMessages] Extracted message indices:', {
+        chatId,
+        totalIndices: messageIndices.length,
+        indices: messageIndices.length > 0 ? messageIndices.slice(0, 10) : 'none', // Log first 10
+        messageCount,
+        validIndices: messageIndices.filter(idx => idx >= 0 && idx < messageCount).length
+    });
+
     // Sort indices descending (newest first) and limit
     messageIndices.sort((a, b) => b - a);
     const indicesToFetch = messageIndices.slice(0, MAX_MESSAGES_DISPLAY);
+
+    console.log('[useMessages] Indices to fetch:', {
+        chatId,
+        totalIndices: messageIndices.length,
+        indicesToFetch: indicesToFetch.length,
+        indices: indicesToFetch.length > 0 ? indicesToFetch : 'none',
+        maxDisplay: MAX_MESSAGES_DISPLAY
+    });
 
     // Fetch message objects
     const {
@@ -90,7 +121,16 @@ export function useMessages(chatId: string | null) {
     } = useQuery({
         queryKey: ['messages', chatId, indicesToFetch],
         queryFn: async () => {
-            if (indicesToFetch.length === 0) return [];
+            if (indicesToFetch.length === 0) {
+                console.log('[useMessages] No indices to fetch');
+                return [];
+            }
+
+            console.log('[useMessages] Fetching message objects:', {
+                chatId,
+                count: indicesToFetch.length,
+                indices: indicesToFetch
+            });
 
             // Fetch dynamic field objects
             // Note: We need to use getDynamicFieldObject for each message
@@ -99,13 +139,45 @@ export function useMessages(chatId: string | null) {
                     parentId: chatId!,
                     name: {
                         type: 'u64',
-                        value: index,
+                        value: index.toString(), // Convert to string for U64 type
                     },
                 })
             );
 
             const results = await Promise.all(messagePromises);
-            return results
+
+            // Log first successful result structure for debugging
+            const firstSuccess = results.find(r => r.data);
+            if (firstSuccess?.data) {
+                const data = firstSuccess.data as any;
+                console.log('[useMessages] First successful result structure:', {
+                    chatId,
+                    index: indicesToFetch[results.indexOf(firstSuccess)],
+                    dataKeys: Object.keys(data),
+                    hasContent: !!data.content,
+                    hasData: !!data.data,
+                    contentType: data.content?.dataType,
+                    dataContentType: data.data?.content?.dataType,
+                    contentValue: data.content?.value ? Object.keys(data.content.value) : 'no value',
+                    fullStructure: JSON.stringify(data, null, 2).substring(0, 500)
+                });
+            }
+
+            console.log('[useMessages] Fetched message objects:', {
+                chatId,
+                requested: indicesToFetch.length,
+                received: results.length,
+                successful: results.filter(r => r.data).length,
+                failed: results.filter(r => r.error).length,
+                errors: results.filter(r => r.error).map(r => {
+                    if (r.error && typeof r.error === 'object' && 'message' in r.error) {
+                        return (r.error as any).message;
+                    }
+                    return String(r.error);
+                })
+            });
+
+            const parsedMessages = results
                 .map((result, idx) => {
                     if (result.data) {
                         return parseMessageObject(result.data, indicesToFetch[idx]);
@@ -113,17 +185,54 @@ export function useMessages(chatId: string | null) {
                     return null;
                 })
                 .filter(Boolean) as Message[];
+
+            console.log('[useMessages] Parsed messages:', {
+                chatId,
+                rawDataCount: results.filter(r => r.data).length,
+                parsedCount: parsedMessages.length,
+                messages: parsedMessages.length > 0
+                    ? parsedMessages.map(m => ({
+                        index: m.messageIndex,
+                        sender: m.sender.slice(0, 8) + '...',
+                        contentType: m.contentType,
+                        contentLength: m.content.length
+                    }))
+                    : 'none'
+            });
+
+            return parsedMessages;
         },
         enabled: indicesToFetch.length > 0 && !!chatId,
     });
 
     const messages: Message[] = messagesData || [];
 
+    const finalError = error || messagesError;
+
+    if (finalError) {
+        console.error('[useMessages] Error loading messages:', {
+            chatId,
+            dynamicFieldsError: error?.message,
+            messagesError: messagesError?.message,
+            messageCount,
+            messagesCount: messages.length
+        });
+    }
+
+    console.log('[useMessages] Final messages state:', {
+        chatId,
+        messageCount,
+        messagesCount: messages.length,
+        isLoading: isLoading || isLoadingMessages,
+        hasMore: messageCount > messages.length,
+        error: finalError?.message
+    });
+
     return {
         messages,
         messageCount,
         isLoading: isLoading || isLoadingMessages,
-        error: error || messagesError,
+        error: finalError,
         refetch,
         hasMore: messageCount > messages.length,
     };
@@ -144,7 +253,7 @@ export function useMessage(chatId: string | null, messageIndex: number | null) {
                 parentId: chatId,
                 name: {
                     type: 'u64',
-                    value: messageIndex,
+                    value: messageIndex.toString(), // Convert to string for U64 type
                 },
             });
 
