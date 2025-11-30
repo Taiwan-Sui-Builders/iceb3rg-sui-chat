@@ -291,13 +291,21 @@ Store message on-chain
   - Room name
   - Member count
   - Settings button (if host)
+    - Close room (kicks everyone out)
+    - Transfer host identity
+    - Mute/unmute members
+    - Kick members
+    - Ban/unban users
   - Leave room button
 - **Message Area:**
-  - Scrollable message list
+  - Scrollable message list (infinite scroll, 50 messages per page)
+  - Maximum 500 messages displayed for very active rooms
+  - Auto-refresh messages (polling every 5-10 seconds)
   - Message bubbles (sender on right, others on left)
   - Timestamp display
-  - File/image previews
+  - File/image previews (thumbnails for images, click to view original)
   - Tip amount display (if applicable)
+  - Tipped messages highlighted visually
 - **Input Area:**
   - Text input field
   - Emoji picker button
@@ -357,9 +365,12 @@ Store message on-chain
 - Optimistic updates: Show message immediately, confirm on-chain
 
 **Pagination:**
-- Messages: Load in batches (e.g., 50 at a time)
-- Chat rooms: Load all (or implement pagination if needed)
+- Messages: Load 50 messages per page
+- Infinite scroll for loading older messages
+- Auto-refresh messages (polling every 5-10 seconds)
+- Maximum 500 messages displayed per page for very active rooms
 - Use `message_count` to determine total messages
+- Chat rooms: Load all from ChatRegistry (or implement pagination if needed)
 
 ### Encryption Flow (Private Rooms)
 
@@ -424,13 +435,15 @@ interface ChatRoom {
 interface Message {
   id: string; // Object ID
   chatId: string;
-  text: string; // Encrypted for private rooms
+  text: string; // Encrypted for private rooms, supports Unicode emoji
   sender: string; // User ID
   timestamp: number; // Unix timestamp in ms
-  tippedAmount: number; // In MIST
-  imageUrl: string;
-  fileUrl?: string; // For file attachments
+  tippedAmount: number; // In MIST (minimum 0.01 SUI = 10,000,000 MIST)
+  imageUrl: string; // Walrus IPFS URL
+  imageThumbnailUrl?: string; // Thumbnail URL for images
+  fileUrl?: string; // For file attachments (Walrus IPFS URL)
   isEncrypted: boolean; // Frontend flag
+  isHighlighted?: boolean; // True if message contains tip
 }
 
 interface Pass {
@@ -444,6 +457,19 @@ interface ChatMember {
   userId: string;
   joinedAt: number;
   isMuted: boolean;
+}
+
+interface TipRanking {
+  userId: string;
+  userName: string;
+  totalTipsReceived: number; // In MIST
+  totalTipsSent: number; // In MIST
+  rank: number;
+}
+
+interface ChatRegistry {
+  id: string; // Object ID (shared object)
+  // Chat rooms registered via Dynamic Object Fields
 }
 ```
 
@@ -512,11 +538,33 @@ interface ChatMember {
 - Require Pass to join
 - Pass ownership verified on-chain
 - Only members can decrypt messages
+- If Pass is lost or transferred, original owner is automatically kicked
+
+**Host Privileges:**
+- Close room (kicks everyone out, room becomes inaccessible)
+- Transfer host identity to another member
+- Mute/unmute members (prevents them from sending messages)
+- Kick members (removes them from room)
+- Ban/unban users (prevents them from joining)
 
 **Ban Management:**
 - Host can ban/unban users
 - Ban stored as Dynamic Object Field on Chat
 - Checked before allowing join/message creation
+- If user is banned mid-conversation, they are immediately removed
+
+### Message Management
+
+**Message Deletion:**
+- Messages are not deletable by users once created
+- Messages are permanently stored on-chain
+- This ensures message history integrity
+
+**Rate Limiting:**
+- Maximum 20 messages per minute per user
+- Rate limiting enforced client-side before transaction submission
+- Prevents spam and reduces transaction costs
+- Rate limit tracked per chat room
 
 ### Security Best Practices
 
